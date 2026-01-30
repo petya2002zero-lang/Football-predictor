@@ -23,7 +23,9 @@ st.markdown("""
     .league-img { width: 18px; height: 18px; margin-right: 8px; vertical-align: middle; }
     
     /* Badges */
-    .elo-tag { background-color: #ffd700; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; }
+    /* Note: Background color is now handled dynamically in Python */
+    .elo-tag { color: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; box-shadow: 0 0 5px rgba(0,0,0,0.2); }
+    
     .rank-tag { background-color: #444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 8px; min-width: 25px; text-align: center; display: inline-block; }
     .form-box { margin-left: 10px; font-size: 10px; letter-spacing: 2px; display: inline-block; }
     
@@ -75,6 +77,14 @@ with st.sidebar:
 # ==========================================
 if sport_mode == "⚽ Football":
     upcoming.sort(key=lambda x: x['date']) # Chronological Sort
+
+    # --- NEW: DYNAMIC ELO COLORS ---
+    def get_elo_color(rating):
+        if rating >= 1800: return "#0abde3" # Cyan (Elite)
+        if rating >= 1650: return "#1dd1a1" # Green (Strong)
+        if rating >= 1500: return "#feca57" # Yellow (Good)
+        if rating >= 1350: return "#ff9f43" # Orange (Below Avg)
+        return "#ff6b6b"                    # Red (Struggling)
 
     def get_form_html(team):
         if team not in history: return ""
@@ -152,6 +162,11 @@ if sport_mode == "⚽ Football":
         # Metadata
         h_elo_val = int(elo_ratings.get(home, 1500))
         a_elo_val = int(elo_ratings.get(away, 1500))
+        
+        # Get Dynamic Colors
+        h_elo_col = get_elo_color(h_elo_val)
+        a_elo_col = get_elo_color(a_elo_val)
+
         h_rank = standings.get(home, "-")
         a_rank = standings.get(away, "-")
         h_form = get_form_html(home)
@@ -177,17 +192,25 @@ if sport_mode == "⚽ Football":
                     <span class='match-date'>📅 {date_str} (CET)</span>
                 """, unsafe_allow_html=True)
                 st.write("") 
+                
+                # HOME ROW
                 st.markdown(f"""
                     <div class='team-row'>
                         <span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'>
-                        <span class='team-name'>{home}</span><span class='elo-tag'>{h_elo_val}</span><span class='form-box'>{h_form}</span>
+                        <span class='team-name'>{home}</span>
+                        <span class='elo-tag' style='background-color:{h_elo_col}'>{h_elo_val}</span>
+                        <span class='form-box'>{h_form}</span>
                     </div>
                 """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-h'>{h_xg:.2f}</span></span>", unsafe_allow_html=True)
+                
+                # AWAY ROW
                 st.markdown(f"""
                     <div class='team-row'>
                         <span class='rank-tag'>#{a_rank}</span><img src='{a_logo}' class='team-img'>
-                        <span class='team-name'>{away}</span><span class='elo-tag'>{a_elo_val}</span><span class='form-box'>{a_form}</span>
+                        <span class='team-name'>{away}</span>
+                        <span class='elo-tag' style='background-color:{a_elo_col}'>{a_elo_val}</span>
+                        <span class='form-box'>{a_form}</span>
                     </div>
                 """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-a'>{a_xg:.2f}</span></span>", unsafe_allow_html=True)
@@ -210,7 +233,6 @@ if sport_mode == "⚽ Football":
                     <div class="stat-box"><div class="stat-label">Both Teams Score</div><div class="stat-value">{prob_btts:.1f}%</div></div>
                 """, unsafe_allow_html=True)
             
-            # --- HUNT FOR VALUE (RESTORED FULL VERSION) ---
             with st.expander("💰 Hunt for Value"):
                 # Helper Function
                 def check_value(odds, prob):
