@@ -23,9 +23,7 @@ st.markdown("""
     .league-img { width: 18px; height: 18px; margin-right: 8px; vertical-align: middle; }
     
     /* Badges */
-    /* Note: Background color is now handled dynamically in Python */
     .elo-tag { color: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; box-shadow: 0 0 5px rgba(0,0,0,0.2); }
-    
     .rank-tag { background-color: #444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 8px; min-width: 25px; text-align: center; display: inline-block; }
     .form-box { margin-left: 10px; font-size: 10px; letter-spacing: 2px; display: inline-block; }
     
@@ -57,6 +55,7 @@ try:
     history = joblib.load('team_history.pkl')
     upcoming = joblib.load('upcoming_matches.pkl')
     elo_ratings = joblib.load('elo_ratings.pkl')
+    elo_history = joblib.load('elo_history.pkl') # NEW
     model = joblib.load('logistic_model.pkl')
     standings = joblib.load('standings.pkl')
     logos = joblib.load('logos.pkl') 
@@ -76,15 +75,14 @@ with st.sidebar:
 # ⚽ FOOTBALL LOGIC
 # ==========================================
 if sport_mode == "⚽ Football":
-    upcoming.sort(key=lambda x: x['date']) # Chronological Sort
+    upcoming.sort(key=lambda x: x['date']) 
 
-    # --- NEW: DYNAMIC ELO COLORS ---
     def get_elo_color(rating):
-        if rating >= 1800: return "#0abde3" # Cyan (Elite)
-        if rating >= 1650: return "#1dd1a1" # Green (Strong)
-        if rating >= 1500: return "#feca57" # Yellow (Good)
-        if rating >= 1350: return "#ff9f43" # Orange (Below Avg)
-        return "#ff6b6b"                    # Red (Struggling)
+        if rating >= 1800: return "#0abde3" 
+        if rating >= 1650: return "#1dd1a1" 
+        if rating >= 1500: return "#feca57" 
+        if rating >= 1350: return "#ff9f43" 
+        return "#ff6b6b"                    
 
     def get_form_html(team):
         if team not in history: return ""
@@ -159,19 +157,14 @@ if sport_mode == "⚽ Football":
         prob_over = p_over * 100
         prob_btts = p_btts * 100
 
-        # Metadata
         h_elo_val = int(elo_ratings.get(home, 1500))
         a_elo_val = int(elo_ratings.get(away, 1500))
-        
-        # Get Dynamic Colors
         h_elo_col = get_elo_color(h_elo_val)
         a_elo_col = get_elo_color(a_elo_val)
-
         h_rank = standings.get(home, "-")
         a_rank = standings.get(away, "-")
         h_form = get_form_html(home)
         a_form = get_form_html(away)
-        
         h_logo = logos['teams'].get(home, "")
         a_logo = logos['teams'].get(away, "")
         l_logo = logos['leagues'].get(match['league'], "")
@@ -180,91 +173,66 @@ if sport_mode == "⚽ Football":
             dt_utc = datetime.strptime(match['date'], "%Y-%m-%dT%H:%M:%SZ")
             dt_cet = dt_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin"))
             date_str = dt_cet.strftime("%d %b %H:%M") 
-        except:
-            date_str = match['date']
+        except: date_str = match['date']
 
         # --- MATCH CARD ---
         with st.container():
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
-                st.markdown(f"""
-                    <div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div>
-                    <span class='match-date'>📅 {date_str} (CET)</span>
-                """, unsafe_allow_html=True)
+                st.markdown(f"<div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div><span class='match-date'>📅 {date_str} (CET)</span>", unsafe_allow_html=True)
                 st.write("") 
-                
-                # HOME ROW
                 st.markdown(f"""
-                    <div class='team-row'>
-                        <span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'>
-                        <span class='team-name'>{home}</span>
-                        <span class='elo-tag' style='background-color:{h_elo_col}'>{h_elo_val}</span>
-                        <span class='form-box'>{h_form}</span>
-                    </div>
+                    <div class='team-row'><span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'><span class='team-name'>{home}</span><span class='elo-tag' style='background-color:{h_elo_col}'>{h_elo_val}</span><span class='form-box'>{h_form}</span></div>
                 """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-h'>{h_xg:.2f}</span></span>", unsafe_allow_html=True)
-                
-                # AWAY ROW
                 st.markdown(f"""
-                    <div class='team-row'>
-                        <span class='rank-tag'>#{a_rank}</span><img src='{a_logo}' class='team-img'>
-                        <span class='team-name'>{away}</span>
-                        <span class='elo-tag' style='background-color:{a_elo_col}'>{a_elo_val}</span>
-                        <span class='form-box'>{a_form}</span>
-                    </div>
+                    <div class='team-row'><span class='rank-tag'>#{a_rank}</span><img src='{a_logo}' class='team-img'><span class='team-name'>{away}</span><span class='elo-tag' style='background-color:{a_elo_col}'>{a_elo_val}</span><span class='form-box'>{a_form}</span></div>
                 """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-a'>{a_xg:.2f}</span></span>", unsafe_allow_html=True)
 
             with c2:
-                st.markdown("**Home Win**")
-                st.progress(int(final_home))
-                st.caption(f"{final_home:.1f}%")
-                st.markdown("**Away Win**")
-                st.progress(int(final_away))
-                st.caption(f"{final_away:.1f}%")
-                st.markdown("**Draw**")
-                st.progress(int(final_draw))
-                st.caption(f"{final_draw:.1f}%")
+                st.markdown("**Home Win**"); st.progress(int(final_home)); st.caption(f"{final_home:.1f}%")
+                st.markdown("**Away Win**"); st.progress(int(final_away)); st.caption(f"{final_away:.1f}%")
+                st.markdown("**Draw**"); st.progress(int(final_draw)); st.caption(f"{final_draw:.1f}%")
 
             with c3:
                 st.write("") 
-                st.markdown(f"""
-                    <div class="stat-box"><div class="stat-label">Over 2.5 Goals</div><div class="stat-value">{prob_over:.1f}%</div></div>
-                    <div class="stat-box"><div class="stat-label">Both Teams Score</div><div class="stat-value">{prob_btts:.1f}%</div></div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"<div class='stat-box'><div class='stat-label'>Over 2.5</div><div class='stat-value'>{prob_over:.1f}%</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stat-box'><div class='stat-label'>BTTS</div><div class='stat-value'>{prob_btts:.1f}%</div></div>", unsafe_allow_html=True)
             
-            with st.expander("💰 Hunt for Value"):
-                # Helper Function
-                def check_value(odds, prob):
-                    if odds <= 1.0: return
-                    implied = (1 / odds) * 100
-                    edge = prob - implied
-                    if edge > 0:
-                        st.markdown(f"<div class='value-badge'>💚 VALUE (+{edge:.1f}%)</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div class='no-value-badge'>🔻 NO VALUE ({edge:.1f}%)</div>", unsafe_allow_html=True)
-
-                st.markdown("**Match Result Odds**")
+            # --- NEW: MOMENTUM GRAPH ---
+            with st.expander("📈 Momentum & Value"):
+                # Value Section
                 vc1, vc2, vc3 = st.columns(3)
-                with vc1:
-                    o_h = st.number_input("Home", 0.0, step=0.01, key=f"oh_{home}{away}")
-                    if o_h > 1.0: check_value(o_h, final_home)
-                with vc2:
-                    o_d = st.number_input("Draw", 0.0, step=0.01, key=f"od_{home}{away}")
-                    if o_d > 1.0: check_value(o_d, final_draw)
-                with vc3:
-                    o_a = st.number_input("Away", 0.0, step=0.01, key=f"oa_{home}{away}")
-                    if o_a > 1.0: check_value(o_a, final_away)
+                def check_value(odds, prob):
+                    if odds > 1:
+                        edge = prob - (1/odds*100)
+                        if edge > 0: st.markdown(f"<div class='value-badge'>💚 +{edge:.1f}%</div>", unsafe_allow_html=True)
+                        else: st.markdown(f"<div class='no-value-badge'>🔻 {edge:.1f}%</div>", unsafe_allow_html=True)
 
-                st.write("") 
-                st.markdown("**Goals & BTTS Odds**")
-                vc4, vc5 = st.columns(2)
-                with vc4:
-                    o_over = st.number_input("Over 2.5", 0.0, step=0.01, key=f"o25_{home}{away}")
-                    if o_over > 1.0: check_value(o_over, prob_over)
-                with vc5:
-                    o_btts = st.number_input("BTTS (Yes)", 0.0, step=0.01, key=f"btts_{home}{away}")
-                    if o_btts > 1.0: check_value(o_btts, prob_btts)
+                with vc1: 
+                    o = st.number_input("Home", 0.0, key=f"h{home}")
+                    check_value(o, final_home)
+                with vc2:
+                    o = st.number_input("Draw", 0.0, key=f"d{home}")
+                    check_value(o, final_draw)
+                with vc3:
+                    o = st.number_input("Away", 0.0, key=f"a{home}")
+                    check_value(o, final_away)
+                
+                st.divider()
+                st.caption("Elo Momentum (Last 15 Updates)")
+                
+                # Chart
+                if home in elo_history and away in elo_history:
+                    h_hist = elo_history[home][-15:]
+                    a_hist = elo_history[away][-15:]
+                    chart_data = pd.DataFrame({
+                        home: h_hist,
+                        away: a_hist
+                    })
+                    st.line_chart(chart_data)
+
             st.divider()
 
 # ==========================================
@@ -297,52 +265,31 @@ elif sport_mode == "🏀 Basketball (NBA)":
 elif sport_mode == "🏈 American Football (NFL)":
     st.title("🏈 NFL Predictor")
     schedule = nfl_data.get('schedule', [])
-    
-    if not schedule:
-        st.info("No live or upcoming NFL games found (Is it the off-season?).")
+    if not schedule: st.info("No games found.")
     
     for match in schedule:
         home = match['home']
         away = match['away']
-        odds = match['odds'] # Spread
-        
+        odds = match['odds']
         h_prob = 50
         try:
-            if "-" in odds: 
-                val = float(odds.split(" ")[-1])
-                if val < 0: h_prob = 50 + (abs(val) * 3) 
+            if "-" in odds: val = float(odds.split(" ")[-1]); h_prob = 50 + (abs(val)*3) if val < 0 else 50 - (abs(val)*3)
         except: pass
         if h_prob > 95: h_prob = 95
+        if h_prob < 5: h_prob = 5
         a_prob = 100 - h_prob
 
-        try:
-            date_str = datetime.strptime(match['date'], "%Y-%m-%dT%H:%MZ").replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d %b %H:%M")
+        try: date_str = datetime.strptime(match['date'], "%Y-%m-%dT%H:%MZ").replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d %b %H:%M")
         except: date_str = match['date']
 
         with st.container():
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
                 st.markdown(f"<div class='nfl-header'>NFL</div><span class='match-date'>📅 {date_str} (CET)</span>", unsafe_allow_html=True)
-                st.write("")
-                st.markdown(f"""
-                    <div class='team-row'><img src='{match['home_logo']}' class='team-img'><span class='team-name'>{home}</span></div>
-                    <div class='team-row'><img src='{match['away_logo']}' class='team-img'><span class='team-name'>{away}</span></div>
-                """, unsafe_allow_html=True)
-            
+                st.markdown(f"<div class='team-row'><img src='{match['home_logo']}' class='team-img'><span class='team-name'>{home}</span></div><div class='team-row'><img src='{match['away_logo']}' class='team-img'><span class='team-name'>{away}</span></div>", unsafe_allow_html=True)
             with c2:
-                st.markdown("**Home Win Probability**")
-                st.progress(int(h_prob))
-                st.caption(f"{h_prob:.0f}%")
-                
-                st.markdown("**Away Win Probability**")
-                st.progress(int(a_prob))
-                st.caption(f"{a_prob:.0f}%")
-
+                st.markdown("**Home Win**"); st.progress(int(h_prob)); st.caption(f"{h_prob:.0f}%")
+                st.markdown("**Away Win**"); st.progress(int(a_prob)); st.caption(f"{a_prob:.0f}%")
             with c3:
-                st.write("")
-                st.markdown(f"""
-                    <div class="stat-box"><div class="stat-label">Current Spread</div><div class="stat-value" style="color:#5bc0de">{odds}</div></div>
-                    <div class="stat-box"><div class="stat-label">Status</div><div class="stat-value">{match['status']}</div></div>
-                """, unsafe_allow_html=True)
-            
+                st.write(""); st.markdown(f"<div class='stat-box'><div class='stat-label'>Spread</div><div class='stat-value' style='color:#5bc0de'>{odds}</div></div>", unsafe_allow_html=True)
             st.divider()

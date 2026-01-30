@@ -8,9 +8,8 @@ from sklearn.linear_model import LogisticRegression
 
 # --- CONFIGURATION ---
 FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7"
-# UPDATED NBA KEY
 NBA_KEY = "44ca299f-090c-4292-b873-f4633452c016"
-NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016" # Keeping this as you set it previously
+NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016" 
 
 # --- HEADERS ---
 FOOTBALL_HEADERS = {'X-Auth-Token': FOOTBALL_KEY}
@@ -19,11 +18,12 @@ NFL_HEADERS = {'Ocp-Apim-Subscription-Key': NFL_KEY}
 
 COMPETITIONS = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'DED', 'PPL', 'CL']
 
-print("🚀 STARTING MULTI-SPORT AI ENGINE...")
+print("🚀 STARTING AI ENGINE (With Momentum Tracking)...")
 
 # --- STORAGE ---
 team_history = {}
 elo_ratings = {}  
+elo_history = {} # NEW: Tracks Elo over time {'Arsenal': [1500, 1510, 1505...]}
 training_data = [] 
 standings = {}
 logos = {'leagues': {}, 'teams': {}} 
@@ -44,13 +44,22 @@ def update_elo(home, away, h_goals, a_goals):
     elif h_goals == a_goals: S_home = 0.5
     else: S_home = 0
     change = K * (S_home - E_home)
+    
+    # Update Ratings
     elo_ratings[home] = R_home + change
     elo_ratings[away] = R_away - change
+    
+    # NEW: Save History
+    if home not in elo_history: elo_history[home] = [1500]
+    if away not in elo_history: elo_history[away] = [1500]
+    elo_history[home].append(elo_ratings[home])
+    elo_history[away].append(elo_ratings[away])
 
 def init_team(team_name):
     if team_name not in team_history:
         team_history[team_name] = {'home': {'scored': [], 'conceded': []}, 'away': {'scored': [], 'conceded': []}, 'all': {'scored': [], 'conceded': []}}
         elo_ratings[team_name] = 1500 
+        elo_history[team_name] = [1500] # NEW
 
 def smart_fetch(url, headers=None):
     for i in range(3):
@@ -189,15 +198,12 @@ else:
 # 🏈 PART 3: NFL ENGINE
 # ==========================================
 print("\n🏈 NFL: Fetching Schedule & Odds...")
-
-# Public ESPN Feed
 url_nfl = "http://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 nfl_res = smart_fetch(url_nfl, headers={}) 
 
 if nfl_res:
     events = nfl_res.get('events', [])
     print(f"   ✅ Found {len(events)} NFL events.")
-    
     for event in events:
         try:
             comp = event['competitions'][0]
@@ -219,8 +225,7 @@ if nfl_res:
                 'away_score': away_team.get('score', '0'),
                 'status': event['status']['type']['state'] 
             })
-        except:
-            continue
+        except: continue
 else:
     print("   ❌ Failed.")
 
@@ -228,6 +233,7 @@ else:
 joblib.dump(team_history, 'team_history.pkl')
 joblib.dump(upcoming, 'upcoming_matches.pkl')
 joblib.dump(elo_ratings, 'elo_ratings.pkl')
+joblib.dump(elo_history, 'elo_history.pkl') # NEW FILE
 joblib.dump(standings, 'standings.pkl')
 joblib.dump(logos, 'logos.pkl') 
 joblib.dump(nba_data, 'nba_data.pkl') 
