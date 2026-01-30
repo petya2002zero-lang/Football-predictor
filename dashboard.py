@@ -24,11 +24,14 @@ st.markdown("""
     
     /* Badges */
     .elo-tag { background-color: #ffd700; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; }
-    .spread-tag { background-color: #333; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; border: 1px solid #555; }
+    .rank-tag { background-color: #444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 8px; min-width: 25px; text-align: center; display: inline-block; }
+    .form-box { margin-left: 10px; font-size: 10px; letter-spacing: 2px; display: inline-block; }
     
     /* Text */
     .team-name { font-size: 18px; font-weight: bold; margin: 0; }
     .xg-text { font-size: 12px; color: #aaa; margin-left: 45px; margin-top: -5px; display: block; }
+    .xg-val-h { color: #00cc96; font-weight: bold; }
+    .xg-val-a { color: #ef553b; font-weight: bold; }
     
     /* Header Info */
     .match-date { font-size: 13px; color: #bbb; display: block; margin-top: 4px; }
@@ -39,6 +42,7 @@ st.markdown("""
     .stat-label { font-size: 11px; color: #aaa; }
     .stat-value { font-size: 14px; font-weight: bold; color: #fff; }
     
+    /* Value Badges (Green/Red) */
     .value-badge { background-color: #00cc96; color: black; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
     .no-value-badge { background-color: #ff4b4b; color: white; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
     
@@ -55,7 +59,7 @@ try:
     standings = joblib.load('standings.pkl')
     logos = joblib.load('logos.pkl') 
     nba_data = joblib.load('nba_data.pkl') 
-    nfl_data = joblib.load('nfl_data.pkl') # NEW
+    nfl_data = joblib.load('nfl_data.pkl') 
 except:
     st.error("⚠️ Data missing. Run 'python train_ai.py' first.")
     st.stop()
@@ -72,18 +76,55 @@ with st.sidebar:
 if sport_mode == "⚽ Football":
     upcoming.sort(key=lambda x: x['date']) # Chronological Sort
 
+    def get_form_html(team):
+        if team not in history: return ""
+        scored = history[team]['all']['scored'][-5:]
+        conceded = history[team]['all']['conceded'][-5:]
+        html = ""
+        for s, c in zip(scored, conceded):
+            if s > c: html += "✅"
+            elif s == c: html += "➖"
+            else: html += "❌"
+        return html
+
     def get_poisson_probs(home, away):
         h_scored = np.mean(history[home]['home']['scored'][-10:]) if history[home]['home']['scored'] else 1.5
         h_conceded = np.mean(history[home]['home']['conceded'][-10:]) if history[home]['home']['conceded'] else 1.2
         a_scored = np.mean(history[away]['away']['scored'][-10:]) if history[away]['away']['scored'] else 1.2
         a_conceded = np.mean(history[away]['away']['conceded'][-10:]) if history[away]['away']['conceded'] else 1.5
+        
         h_xg = (h_scored + a_conceded) / 2
         a_xg = (a_scored + h_conceded) / 2
+        
         h_sim = np.random.poisson(h_xg, 10000)
         a_sim = np.random.poisson(a_xg, 10000)
-        return np.mean(h_sim > a_sim), np.mean(h_sim == a_sim), np.mean(h_sim < a_sim), h_xg, a_xg, np.mean((h_sim + a_sim) > 2.5), np.mean((h_sim > 0) & (a_sim > 0))
+        
+        p_home = np.mean(h_sim > a_sim)
+        p_draw = np.mean(h_sim == a_sim)
+        p_away = np.mean(h_sim < a_sim)
+        p_over_2_5 = np.mean((h_sim + a_sim) > 2.5)
+        p_btts = np.mean((h_sim > 0) & (a_sim > 0))
+        return p_home, p_draw, p_away, h_xg, a_xg, p_over_2_5, p_btts
+
+    def get_logistic_probs(home, away):
+        h_elo = elo_ratings.get(home, 1500)
+        a_elo = elo_ratings.get(away, 1500)
+        features = pd.DataFrame([[ (h_elo + 100) - a_elo ]], columns=['elo_diff'])
+        probs = model.predict_proba(features)[0]
+        return probs[2], probs[1], probs[0] 
+
+    def get_elo_probs(home, away):
+        h_elo = elo_ratings.get(home, 1500) + 100 
+        a_elo = elo_ratings.get(away, 1500)
+        prob_h = 1 / (1 + 10 ** ((a_elo - h_elo) / 400))
+        prob_a = 1 / (1 + 10 ** ((h_elo - a_elo) / 400))
+        prob_d = 1 - (prob_h + prob_a) 
+        if prob_d < 0: prob_d = 0.25 
+        total = prob_h + prob_a + prob_d
+        return prob_h/total, prob_d/total, prob_a/total
 
     st.title("⚽ Football Predictor")
+    
     leagues = sorted(list(set([m['league'] for m in upcoming])))
     default_sel = [l for l in leagues if "Premier League" in l or "Bundesliga" in l]
     sel_league = st.multiselect("Filter League", leagues, default=default_sel if default_sel else leagues[:2])
@@ -91,46 +132,117 @@ if sport_mode == "⚽ Football":
 
     for match in upcoming:
         if match['league'] not in sel_league: continue
-        home, away = match['home'], match['away']
+        
+        home = match['home']
+        away = match['away']
         if home not in history or away not in history: continue
         
-        p_h, p_d, p_a, h_xg, a_xg, p_o, p_b = get_poisson_probs(home, away)
+        # Run Models
+        p_home, p_draw, p_away, h_xg, a_xg, p_over, p_btts = get_poisson_probs(home, away)
+        l_home, l_draw, l_away = get_logistic_probs(home, away)
+        e_home, e_draw, e_away = get_elo_probs(home, away)
+        
+        final_home = (p_home + l_home + e_home) / 3 * 100
+        final_draw = (p_draw + l_draw + e_draw) / 3 * 100
+        final_away = (p_away + l_away + e_away) / 3 * 100
+        
+        prob_over = p_over * 100
+        prob_btts = p_btts * 100
+
+        # Metadata
+        h_elo_val = int(elo_ratings.get(home, 1500))
+        a_elo_val = int(elo_ratings.get(away, 1500))
+        h_rank = standings.get(home, "-")
+        a_rank = standings.get(away, "-")
+        h_form = get_form_html(home)
+        a_form = get_form_html(away)
+        
         h_logo = logos['teams'].get(home, "")
         a_logo = logos['teams'].get(away, "")
-        
-        try:
-            date_str = datetime.strptime(match['date'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d %b %H:%M")
-        except: date_str = match['date']
+        l_logo = logos['leagues'].get(match['league'], "")
 
+        try:
+            dt_utc = datetime.strptime(match['date'], "%Y-%m-%dT%H:%M:%SZ")
+            dt_cet = dt_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin"))
+            date_str = dt_cet.strftime("%d %b %H:%M") 
+        except:
+            date_str = match['date']
+
+        # --- MATCH CARD ---
         with st.container():
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
-                st.markdown(f"<div class='league-title'>{match['league']}</div><span class='match-date'>📅 {date_str}</span>", unsafe_allow_html=True)
-                st.write("")
-                st.markdown(f"<div class='team-row'><img src='{h_logo}' class='team-img'><span class='team-name'>{home}</span><span class='elo-tag'>{int(elo_ratings.get(home,1500))}</span></div>", unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div>
+                    <span class='match-date'>📅 {date_str} (CET)</span>
+                """, unsafe_allow_html=True)
+                st.write("") 
+                st.markdown(f"""
+                    <div class='team-row'>
+                        <span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'>
+                        <span class='team-name'>{home}</span><span class='elo-tag'>{h_elo_val}</span><span class='form-box'>{h_form}</span>
+                    </div>
+                """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-h'>{h_xg:.2f}</span></span>", unsafe_allow_html=True)
-                st.markdown(f"<div class='team-row'><img src='{a_logo}' class='team-img'><span class='team-name'>{away}</span><span class='elo-tag'>{int(elo_ratings.get(away,1500))}</span></div>", unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div class='team-row'>
+                        <span class='rank-tag'>#{a_rank}</span><img src='{a_logo}' class='team-img'>
+                        <span class='team-name'>{away}</span><span class='elo-tag'>{a_elo_val}</span><span class='form-box'>{a_form}</span>
+                    </div>
+                """, unsafe_allow_html=True)
                 st.markdown(f"<span class='xg-text'>xG: <span class='xg-val-a'>{a_xg:.2f}</span></span>", unsafe_allow_html=True)
+
             with c2:
-                st.markdown("**Home**"); st.progress(int(p_h*100)); st.caption(f"{p_h*100:.1f}%")
-                st.markdown("**Away**"); st.progress(int(p_a*100)); st.caption(f"{p_a*100:.1f}%")
-                st.markdown("**Draw**"); st.progress(int(p_d*100)); st.caption(f"{p_d*100:.1f}%")
+                st.markdown("**Home Win**")
+                st.progress(int(final_home))
+                st.caption(f"{final_home:.1f}%")
+                st.markdown("**Away Win**")
+                st.progress(int(final_away))
+                st.caption(f"{final_away:.1f}%")
+                st.markdown("**Draw**")
+                st.progress(int(final_draw))
+                st.caption(f"{final_draw:.1f}%")
+
             with c3:
-                st.write("")
-                st.markdown(f"<div class='stat-box'><div class='stat-label'>Over 2.5</div><div class='stat-value'>{p_o*100:.1f}%</div></div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='stat-box'><div class='stat-label'>BTTS</div><div class='stat-value'>{p_b*100:.1f}%</div></div>", unsafe_allow_html=True)
+                st.write("") 
+                st.markdown(f"""
+                    <div class="stat-box"><div class="stat-label">Over 2.5 Goals</div><div class="stat-value">{prob_over:.1f}%</div></div>
+                    <div class="stat-box"><div class="stat-label">Both Teams Score</div><div class="stat-value">{prob_btts:.1f}%</div></div>
+                """, unsafe_allow_html=True)
             
+            # --- HUNT FOR VALUE (RESTORED FULL VERSION) ---
             with st.expander("💰 Hunt for Value"):
+                # Helper Function
+                def check_value(odds, prob):
+                    if odds <= 1.0: return
+                    implied = (1 / odds) * 100
+                    edge = prob - implied
+                    if edge > 0:
+                        st.markdown(f"<div class='value-badge'>💚 VALUE (+{edge:.1f}%)</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<div class='no-value-badge'>🔻 NO VALUE ({edge:.1f}%)</div>", unsafe_allow_html=True)
+
+                st.markdown("**Match Result Odds**")
                 vc1, vc2, vc3 = st.columns(3)
-                with vc1: 
-                    o = st.number_input("Home", 0.0, key=f"h{home}")
-                    if o > 1: st.markdown(f"<div class='{'value-badge' if (p_h*100)-(1/o*100)>0 else 'no-value-badge'}'>Edge: {(p_h*100)-(1/o*100):.1f}%</div>", unsafe_allow_html=True)
+                with vc1:
+                    o_h = st.number_input("Home", 0.0, step=0.01, key=f"oh_{home}{away}")
+                    if o_h > 1.0: check_value(o_h, final_home)
                 with vc2:
-                    o = st.number_input("Draw", 0.0, key=f"d{home}")
-                    if o > 1: st.markdown(f"<div class='{'value-badge' if (p_d*100)-(1/o*100)>0 else 'no-value-badge'}'>Edge: {(p_d*100)-(1/o*100):.1f}%</div>", unsafe_allow_html=True)
+                    o_d = st.number_input("Draw", 0.0, step=0.01, key=f"od_{home}{away}")
+                    if o_d > 1.0: check_value(o_d, final_draw)
                 with vc3:
-                    o = st.number_input("Away", 0.0, key=f"a{home}")
-                    if o > 1: st.markdown(f"<div class='{'value-badge' if (p_a*100)-(1/o*100)>0 else 'no-value-badge'}'>Edge: {(p_a*100)-(1/o*100):.1f}%</div>", unsafe_allow_html=True)
+                    o_a = st.number_input("Away", 0.0, step=0.01, key=f"oa_{home}{away}")
+                    if o_a > 1.0: check_value(o_a, final_away)
+
+                st.write("") 
+                st.markdown("**Goals & BTTS Odds**")
+                vc4, vc5 = st.columns(2)
+                with vc4:
+                    o_over = st.number_input("Over 2.5", 0.0, step=0.01, key=f"o25_{home}{away}")
+                    if o_over > 1.0: check_value(o_over, prob_over)
+                with vc5:
+                    o_btts = st.number_input("BTTS (Yes)", 0.0, step=0.01, key=f"btts_{home}{away}")
+                    if o_btts > 1.0: check_value(o_btts, prob_btts)
             st.divider()
 
 # ==========================================
@@ -158,7 +270,7 @@ elif sport_mode == "🏀 Basketball (NBA)":
             st.divider()
 
 # ==========================================
-# 🏈 NFL LOGIC (NEW)
+# 🏈 NFL LOGIC
 # ==========================================
 elif sport_mode == "🏈 American Football (NFL)":
     st.title("🏈 NFL Predictor")
@@ -172,13 +284,11 @@ elif sport_mode == "🏈 American Football (NFL)":
         away = match['away']
         odds = match['odds'] # Spread
         
-        # Simple Logic: If spread is -3.5 (Home favored), give home higher probability
         h_prob = 50
         try:
-            # Parse spread roughly
-            if "-" in odds: # Favored
+            if "-" in odds: 
                 val = float(odds.split(" ")[-1])
-                if val < 0: h_prob = 50 + (abs(val) * 3) # Approx 3% per point
+                if val < 0: h_prob = 50 + (abs(val) * 3) 
         except: pass
         if h_prob > 95: h_prob = 95
         a_prob = 100 - h_prob
