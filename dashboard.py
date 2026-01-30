@@ -11,38 +11,41 @@ st.set_page_config(page_title="AI Multi-Sport Predictor", page_icon="🏆", layo
 # --- CSS STYLES ---
 st.markdown("""
 <style>
+    /* Main Card */
     .match-card { background-color: #262730; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #444; }
+    
+    /* Layout Helpers */
     .team-row { display: flex; align-items: center; margin-bottom: 8px; }
     .team-img { width: 25px; height: 25px; margin-right: 10px; object-fit: contain; }
     .league-img { width: 18px; height: 18px; margin-right: 8px; vertical-align: middle; }
+    
+    /* Badges */
     .elo-tag { background-color: #ffd700; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; }
     .rank-tag { background-color: #444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 8px; min-width: 25px; text-align: center; display: inline-block; }
     .form-box { margin-left: 10px; font-size: 10px; letter-spacing: 2px; display: inline-block; }
+    
+    /* Text */
     .team-name { font-size: 18px; font-weight: bold; margin: 0; }
     .xg-text { font-size: 12px; color: #aaa; margin-left: 45px; margin-top: -5px; display: block; }
+    .xg-val-h { color: #00cc96; font-weight: bold; }
+    .xg-val-a { color: #ef553b; font-weight: bold; }
+    
+    /* Header Info */
     .match-date { font-size: 13px; color: #bbb; display: block; margin-top: 4px; }
     .league-title { font-size: 12px; font-weight: bold; color: #fff; text-transform: uppercase; display: flex; align-items: center; }
+
+    /* Stats & Value */
     .stat-box { background-color: #1e1e1e; padding: 8px; border-radius: 6px; text-align: center; margin-bottom: 6px; border: 1px solid #333; }
     .stat-label { font-size: 11px; color: #aaa; }
     .stat-value { font-size: 14px; font-weight: bold; color: #fff; }
+    
+    /* Value Badges */
     .value-badge { background-color: #00cc96; color: black; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
     .no-value-badge { background-color: #ff4b4b; color: white; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
+    
     .stRadio > label { font-size: 18px !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
-
-# --- LOAD DATA ---
-try:
-    history = joblib.load('team_history.pkl')
-    upcoming = joblib.load('upcoming_matches.pkl')
-    elo_ratings = joblib.load('elo_ratings.pkl')
-    model = joblib.load('logistic_model.pkl')
-    standings = joblib.load('standings.pkl')
-    logos = joblib.load('logos.pkl') 
-    nba_data = joblib.load('nba_data.pkl') # Load NBA Data
-except:
-    st.error("⚠️ Models missing. Run 'python train_ai.py' first.")
-    st.stop()
 
 # --- SIDEBAR SPORT SELECTOR ---
 with st.sidebar:
@@ -54,7 +57,23 @@ with st.sidebar:
 # ⚽ FOOTBALL LOGIC
 # ==========================================
 if sport_mode == "⚽ Football":
-    # (Football logic remains exactly the same as before)
+    
+    # --- LOAD DATA ---
+    try:
+        history = joblib.load('team_history.pkl')
+        upcoming = joblib.load('upcoming_matches.pkl')
+        elo_ratings = joblib.load('elo_ratings.pkl')
+        model = joblib.load('logistic_model.pkl')
+        standings = joblib.load('standings.pkl')
+        logos = joblib.load('logos.pkl') 
+    except:
+        st.error("⚠️ Models missing. Run 'python train_ai.py' first.")
+        st.stop()
+
+    # --- NEW: SORT MATCHES CHRONOLOGICALLY ---
+    # This sorts the list by the 'date' string (ISO format sorts correctly)
+    upcoming.sort(key=lambda x: x['date'])
+
     def get_form_html(team):
         if team not in history: return ""
         scored = history[team]['all']['scored'][-5:]
@@ -228,6 +247,12 @@ elif sport_mode == "🏀 Basketball (NBA)":
     st.title("🏀 Basketball Predictor (NBA)")
     st.caption("Live Schedule from Balldontlie.io")
 
+    # Load NBA Data
+    try:
+        nba_data = joblib.load('nba_data.pkl')
+    except:
+        nba_data = {}
+
     nba_schedule = nba_data.get('schedule', [])
 
     if not nba_schedule:
@@ -237,14 +262,11 @@ elif sport_mode == "🏀 Basketball (NBA)":
         home = match['home']
         away = match['away']
         
-        # Placeholder Probabilities (50/50 until we integrate NBA Stats History)
+        # Placeholder Probabilities
         h_prob = 50
         a_prob = 50
         
-        # Parse Date
         try:
-            # NBA API date format handling
-            # Assuming '2023-10-24T00:00:00.000Z' or similar
             date_part = match['date'].split("T")[0] 
             date_str = datetime.strptime(date_part, "%Y-%m-%d").strftime("%d %b")
         except:
