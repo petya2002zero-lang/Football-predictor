@@ -7,18 +7,19 @@ from datetime import datetime, timedelta
 from sklearn.linear_model import LogisticRegression
 
 # --- CONFIGURATION ---
-FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7" # Soccer
-NBA_KEY = "544648ce-9eb1-48f4-8c8f-9f9951b8ca94"      # Basketball
-NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016"      # American Football
+FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7"
+# UPDATED NBA KEY
+NBA_KEY = "44ca299f-090c-4292-b873-f4633452c016"
+NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016" # Keeping this as you set it previously
 
 # --- HEADERS ---
 FOOTBALL_HEADERS = {'X-Auth-Token': FOOTBALL_KEY}
 NBA_HEADERS = {'Authorization': NBA_KEY}
-NFL_HEADERS = {'Ocp-Apim-Subscription-Key': NFL_KEY} # Standard format for NFL APIs
+NFL_HEADERS = {'Ocp-Apim-Subscription-Key': NFL_KEY}
 
 COMPETITIONS = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'DED', 'PPL', 'CL']
 
-print("🚀 STARTING MULTI-SPORT AI ENGINE (Soccer + NBA + NFL)...")
+print("🚀 STARTING MULTI-SPORT AI ENGINE...")
 
 # --- STORAGE ---
 team_history = {}
@@ -27,7 +28,6 @@ training_data = []
 standings = {}
 logos = {'leagues': {}, 'teams': {}} 
 
-# Sport Specific Data
 nba_data = {'schedule': []}
 nfl_data = {'schedule': []}
 
@@ -183,18 +183,16 @@ if nba_res:
             'id': g['id']
         })
 else:
-    print("   ❌ Failed.")
+    print("   ❌ Failed (Check Key or Limits).")
 
 # ==========================================
-# 🏈 PART 3: NFL ENGINE (NEW)
+# 🏈 PART 3: NFL ENGINE
 # ==========================================
 print("\n🏈 NFL: Fetching Schedule & Odds...")
 
-# We use a reliable public endpoint for NFL scores that works reliably without complex setups
-# This gets live/upcoming NFL games
+# Public ESPN Feed
 url_nfl = "http://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
-
-nfl_res = smart_fetch(url_nfl, headers={}) # Public feed
+nfl_res = smart_fetch(url_nfl, headers={}) 
 
 if nfl_res:
     events = nfl_res.get('events', [])
@@ -206,21 +204,20 @@ if nfl_res:
             home_team = next(t for t in comp['competitors'] if t['homeAway'] == 'home')
             away_team = next(t for t in comp['competitors'] if t['homeAway'] == 'away')
             
-            # Get Odds (Spread) if available
             odds_str = "0.0"
             if 'odds' in comp and len(comp['odds']) > 0:
-                odds_str = comp['odds'][0].get('details', '0.0') # e.g. "DAL -3.5"
+                odds_str = comp['odds'][0].get('details', '0.0') 
             
             nfl_data['schedule'].append({
                 'home': home_team['team']['displayName'],
                 'away': away_team['team']['displayName'],
                 'home_logo': home_team['team'].get('logo', ''),
                 'away_logo': away_team['team'].get('logo', ''),
-                'date': event['date'], # ISO format
+                'date': event['date'], 
                 'odds': odds_str,
                 'home_score': home_team.get('score', '0'),
                 'away_score': away_team.get('score', '0'),
-                'status': event['status']['type']['state'] # pre, in, post
+                'status': event['status']['type']['state'] 
             })
         except:
             continue
@@ -234,6 +231,6 @@ joblib.dump(elo_ratings, 'elo_ratings.pkl')
 joblib.dump(standings, 'standings.pkl')
 joblib.dump(logos, 'logos.pkl') 
 joblib.dump(nba_data, 'nba_data.pkl') 
-joblib.dump(nfl_data, 'nfl_data.pkl') # NEW FILE
+joblib.dump(nfl_data, 'nfl_data.pkl') 
 
 print("\n✅ DONE. Database Updated.")
