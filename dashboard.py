@@ -12,7 +12,7 @@ st.set_page_config(page_title="AI Multi-Sport Predictor", page_icon="🏆", layo
 st.markdown("""
 <style>
     /* Card Styles */
-    .match-card { background-color: #262730; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #444; }
+    .match-card { background-color: #262730; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #444; }
     
     /* Sport Specific Colors */
     .nfl-header { color: #5bc0de; font-weight: bold; font-size: 14px; text-transform: uppercase; }
@@ -20,31 +20,28 @@ st.markdown("""
     /* Layout Helpers */
     .team-row { display: flex; align-items: center; margin-bottom: 8px; }
     .team-img { width: 30px; height: 30px; margin-right: 12px; object-fit: contain; }
-    .league-img { width: 18px; height: 18px; margin-right: 8px; vertical-align: middle; }
     
     /* Badges */
     .elo-tag { color: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-left: 8px; box-shadow: 0 0 5px rgba(0,0,0,0.2); }
     .rank-tag { background-color: #444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 8px; min-width: 25px; text-align: center; display: inline-block; }
     .form-box { margin-left: 10px; font-size: 10px; letter-spacing: 2px; display: inline-block; }
     
-    /* Text */
+    /* Confidence Tiers */
+    .tier-diamond { background-color: #0abde3; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #00d2d3; display: inline-block; margin-bottom: 8px; }
+    .tier-gold { background-color: #feca57; color: black; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #ff9f43; display: inline-block; margin-bottom: 8px; }
+    .tier-silver { background-color: #c8d6e5; color: black; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #8395a7; display: inline-block; margin-bottom: 8px; }
+    
+    /* Text & Stats */
     .team-name { font-size: 18px; font-weight: bold; margin: 0; }
     .xg-text { font-size: 12px; color: #aaa; margin-left: 45px; margin-top: -5px; display: block; }
-    .xg-val-h { color: #00cc96; font-weight: bold; }
-    .xg-val-a { color: #ef553b; font-weight: bold; }
-    
-    /* Header Info */
     .match-date { font-size: 13px; color: #bbb; display: block; margin-top: 4px; }
-    .league-title { font-size: 12px; font-weight: bold; color: #fff; text-transform: uppercase; display: flex; align-items: center; }
-
-    /* Stats & Value */
     .stat-box { background-color: #1e1e1e; padding: 8px; border-radius: 6px; text-align: center; margin-bottom: 6px; border: 1px solid #333; }
     .stat-label { font-size: 11px; color: #aaa; }
     .stat-value { font-size: 14px; font-weight: bold; color: #fff; }
     
-    /* Value Badges (Green/Red) */
-    .value-badge { background-color: #00cc96; color: black; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
-    .no-value-badge { background-color: #ff4b4b; color: white; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
+    /* Smart Insights List */
+    .insight-list { font-size: 13px; color: #dfe6e9; margin-top: 10px; padding-left: 20px; }
+    .insight-list li { margin-bottom: 4px; }
     
     .stRadio > label { font-size: 18px !important; font-weight: bold; }
 </style>
@@ -55,7 +52,7 @@ try:
     history = joblib.load('team_history.pkl')
     upcoming = joblib.load('upcoming_matches.pkl')
     elo_ratings = joblib.load('elo_ratings.pkl')
-    elo_history = joblib.load('elo_history.pkl') # NEW
+    elo_history = joblib.load('elo_history.pkl') 
     model = joblib.load('logistic_model.pkl')
     standings = joblib.load('standings.pkl')
     logos = joblib.load('logos.pkl') 
@@ -70,6 +67,55 @@ with st.sidebar:
     st.title("🏆 Sport Selection")
     sport_mode = st.radio("", ["⚽ Football", "🏀 Basketball (NBA)", "🏈 American Football (NFL)"])
     st.divider()
+
+# ==========================================
+# 🧠 NEW: SMART LOGIC FUNCTIONS
+# ==========================================
+
+def get_confidence_tier(prob_win):
+    """Returns HTML badge for confidence level based on win %"""
+    if prob_win >= 70:
+        return "<span class='tier-diamond'>💎 DIAMOND TIER (High Confidence)</span>"
+    elif prob_win >= 55:
+        return "<span class='tier-gold'>🥇 GOLD TIER (Moderate Confidence)</span>"
+    else:
+        return "<span class='tier-silver'>🥈 SILVER TIER (Risky / Close Match)</span>"
+
+def get_smart_insights(team_name):
+    """Generates text bullets based on recent performance"""
+    if team_name not in history: return []
+    
+    insights = []
+    
+    # Get last 5 games
+    scored = history[team_name]['all']['scored'][-5:]
+    conceded = history[team_name]['all']['conceded'][-5:]
+    
+    if not scored: return []
+
+    # 1. Winning Streak
+    wins = 0
+    for s, c in zip(reversed(scored), reversed(conceded)):
+        if s > c: wins += 1
+        else: break
+    if wins >= 3: insights.append(f"🔥 <b>{team_name}</b> is on a {wins}-game winning streak.")
+    
+    # 2. Scoring Power
+    avg_goals = np.mean(scored)
+    if avg_goals >= 2.0: insights.append(f"⚽ <b>{team_name}</b> is scoring heavily ({avg_goals:.1f} goals/game recently).")
+    
+    # 3. Defense (Clean Sheets)
+    clean_sheets = conceded.count(0)
+    if clean_sheets >= 2: insights.append(f"🛡️ <b>{team_name}</b> has kept {clean_sheets} clean sheets in last 5 games.")
+    
+    # 4. Poor Form
+    losses = 0
+    for s, c in zip(reversed(scored), reversed(conceded)):
+        if s < c: losses += 1
+        else: break
+    if losses >= 3: insights.append(f"⚠️ <b>{team_name}</b> is struggling (lost last {losses} games).")
+    
+    return insights
 
 # ==========================================
 # ⚽ FOOTBALL LOGIC
@@ -107,12 +153,7 @@ if sport_mode == "⚽ Football":
         h_sim = np.random.poisson(h_xg, 10000)
         a_sim = np.random.poisson(a_xg, 10000)
         
-        p_home = np.mean(h_sim > a_sim)
-        p_draw = np.mean(h_sim == a_sim)
-        p_away = np.mean(h_sim < a_sim)
-        p_over_2_5 = np.mean((h_sim + a_sim) > 2.5)
-        p_btts = np.mean((h_sim > 0) & (a_sim > 0))
-        return p_home, p_draw, p_away, h_xg, a_xg, p_over_2_5, p_btts
+        return np.mean(h_sim > a_sim), np.mean(h_sim == a_sim), np.mean(h_sim < a_sim), h_xg, a_xg, np.mean((h_sim + a_sim) > 2.5), np.mean((h_sim > 0) & (a_sim > 0))
 
     def get_logistic_probs(home, away):
         h_elo = elo_ratings.get(home, 1500)
@@ -157,10 +198,12 @@ if sport_mode == "⚽ Football":
         prob_over = p_over * 100
         prob_btts = p_btts * 100
 
+        # Metadata
         h_elo_val = int(elo_ratings.get(home, 1500))
         a_elo_val = int(elo_ratings.get(away, 1500))
         h_elo_col = get_elo_color(h_elo_val)
         a_elo_col = get_elo_color(a_elo_val)
+        
         h_rank = standings.get(home, "-")
         a_rank = standings.get(away, "-")
         h_form = get_form_html(home)
@@ -175,11 +218,26 @@ if sport_mode == "⚽ Football":
             date_str = dt_cet.strftime("%d %b %H:%M") 
         except: date_str = match['date']
 
+        # Determine Confidence Tier
+        max_prob = max(final_home, final_away)
+        tier_badge = get_confidence_tier(max_prob)
+
+        # Generate Smart Insights
+        home_insights = get_smart_insights(home)
+        away_insights = get_smart_insights(away)
+        all_insights = home_insights + away_insights
+
         # --- MATCH CARD ---
         with st.container():
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
-                st.markdown(f"<div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div><span class='match-date'>📅 {date_str} (CET)</span>", unsafe_allow_html=True)
+                st.markdown(tier_badge, unsafe_allow_html=True) # Confidence Tier
+                st.markdown(f"""
+                    <div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div>
+                    <span class='match-date'>📅 {date_str} (CET)</span>
+                """, unsafe_allow_html=True)
+                
+                # Teams
                 st.write("") 
                 st.markdown(f"""
                     <div class='team-row'><span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'><span class='team-name'>{home}</span><span class='elo-tag' style='background-color:{h_elo_col}'>{h_elo_val}</span><span class='form-box'>{h_form}</span></div>
@@ -195,14 +253,27 @@ if sport_mode == "⚽ Football":
                 st.markdown("**Away Win**"); st.progress(int(final_away)); st.caption(f"{final_away:.1f}%")
                 st.markdown("**Draw**"); st.progress(int(final_draw)); st.caption(f"{final_draw:.1f}%")
 
-            with c3:
-                st.write("") 
-                st.markdown(f"<div class='stat-box'><div class='stat-label'>Over 2.5</div><div class='stat-value'>{prob_over:.1f}%</div></div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='stat-box'><div class='stat-label'>BTTS</div><div class='stat-value'>{prob_btts:.1f}%</div></div>", unsafe_allow_html=True)
             
-            # --- NEW: MOMENTUM GRAPH ---
-            with st.expander("📈 Momentum & Value"):
-                # Value Section
+                with c3:
+                    st.write("") 
+                    st.markdown(f'<div class="stat-box"><div class="stat-label">Over 2.5 Goals</div><div class="stat-value">{prob_over:.1f}%</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="stat-box"><div class="stat-label">BTTS</div><div class="stat-value">{prob_btts:.1f}%</div></div>', unsafe_allow_html=True)
+
+            
+            # --- EXPANDER: INSIGHTS & MOMENTUM ---
+            with st.expander("📊 Smart Insights & Value"):
+                # 1. Smart Insights Section
+                if all_insights:
+                    st.markdown("**🧠 AI Smart Insights:**")
+                    insight_html = "<ul class='insight-list'>" + "".join([f"<li>{i}</li>" for i in all_insights]) + "</ul>"
+                    st.markdown(insight_html, unsafe_allow_html=True)
+                else:
+                    st.caption("No strong statistical trends detected for these teams.")
+                
+                st.divider()
+                
+                # 2. Value Calculator
+                st.markdown("**💰 Value Calculator**")
                 vc1, vc2, vc3 = st.columns(3)
                 def check_value(odds, prob):
                     if odds > 1:
@@ -211,26 +282,22 @@ if sport_mode == "⚽ Football":
                         else: st.markdown(f"<div class='no-value-badge'>🔻 {edge:.1f}%</div>", unsafe_allow_html=True)
 
                 with vc1: 
-                    o = st.number_input("Home", 0.0, key=f"h{home}")
+                    o = st.number_input("Home Odds", 0.0, key=f"h{home}")
                     check_value(o, final_home)
                 with vc2:
-                    o = st.number_input("Draw", 0.0, key=f"d{home}")
+                    o = st.number_input("Draw Odds", 0.0, key=f"d{home}")
                     check_value(o, final_draw)
                 with vc3:
-                    o = st.number_input("Away", 0.0, key=f"a{home}")
+                    o = st.number_input("Away Odds", 0.0, key=f"a{home}")
                     check_value(o, final_away)
                 
                 st.divider()
                 st.caption("Elo Momentum (Last 15 Updates)")
                 
-                # Chart
                 if home in elo_history and away in elo_history:
                     h_hist = elo_history[home][-15:]
                     a_hist = elo_history[away][-15:]
-                    chart_data = pd.DataFrame({
-                        home: h_hist,
-                        away: a_hist
-                    })
+                    chart_data = pd.DataFrame({home: h_hist, away: a_hist})
                     st.line_chart(chart_data)
 
             st.divider()
@@ -268,14 +335,12 @@ elif sport_mode == "🏈 American Football (NFL)":
     if not schedule: st.info("No games found.")
     
     for match in schedule:
-        home = match['home']
-        away = match['away']
-        odds = match['odds']
+        home, away, odds = match['home'], match['away'], match['odds']
         h_prob = 50
         try:
             if "-" in odds: val = float(odds.split(" ")[-1]); h_prob = 50 + (abs(val)*3) if val < 0 else 50 - (abs(val)*3)
         except: pass
-        if h_prob > 95: h_prob = 95
+        if h_prob > 95: h_prob = 95; 
         if h_prob < 5: h_prob = 5
         a_prob = 100 - h_prob
 
