@@ -7,19 +7,20 @@ from datetime import datetime, timedelta
 from sklearn.linear_model import LogisticRegression
 
 # --- CONFIGURATION ---
+# REVERTED TO ORIGINAL KEY
 API_KEY = "3f86c808c5fb455f8dfcab765b8053c7"
 HEADERS = {'X-Auth-Token': API_KEY}
 
 COMPETITIONS = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'DED', 'PPL', 'CL']
 
-print("🚀 STARTING AI ENGINE (With Logos)...")
+print("🚀 STARTING AI ENGINE (Original Key)...")
 
 # --- DATA STRUCTURES ---
 team_history = {}
 elo_ratings = {}  
 training_data = [] 
 standings = {}
-logos = {'leagues': {}, 'teams': {}} # NEW: Stores Image URLs
+logos = {'leagues': {}, 'teams': {}} 
 
 def get_elo(team):
     return elo_ratings.get(team, 1500)
@@ -71,18 +72,12 @@ for comp in COMPETITIONS:
         matches = data.get('matches', [])
         matches.sort(key=lambda x: x['utcDate'])
         
-        # Capture League Logo
-        if 'competition' in data and 'emblem' in data['competition']: # specific endpoint structure might vary
-             pass 
-        # Actually easier to get it from match objects usually
-        
         for m in matches:
             if m['score']['fullTime']['home'] is None: continue
             
             home = m['homeTeam']['name']
             away = m['awayTeam']['name']
             
-            # --- CAPTURE LOGOS (NEW) ---
             logos['teams'][home] = m['homeTeam']['crest']
             logos['teams'][away] = m['awayTeam']['crest']
             logos['leagues'][m['competition']['name']] = m['competition']['emblem']
@@ -93,7 +88,6 @@ for comp in COMPETITIONS:
             init_team(home)
             init_team(away)
             
-            # Training Data
             if hg > ag: res = 2
             elif hg == ag: res = 1
             else: res = 0
@@ -125,13 +119,15 @@ for comp in COMPETITIONS:
 
 # --- 2. TRAIN BRAIN ---
 print("   🧠 Training Logistic Regression Brain...")
-if not training_data: exit()
-
-df_train = pd.DataFrame(training_data)
-X = df_train[['elo_diff']]
-y = df_train['result']
-model = LogisticRegression(solver='lbfgs') 
-model.fit(X, y)
+if not training_data: 
+    print("⚠️ No data collected. Check API Key validity.")
+else:
+    df_train = pd.DataFrame(training_data)
+    X = df_train[['elo_diff']]
+    y = df_train['result']
+    model = LogisticRegression(solver='lbfgs') 
+    model.fit(X, y)
+    joblib.dump(model, 'logistic_model.pkl')
 
 # --- 3. GET STANDINGS ---
 print("\n🏆 PHASE 2: Fetching League Tables...")
@@ -147,7 +143,6 @@ for comp in COMPETITIONS:
                 team_name = row['team']['name']
                 rank = row['position']
                 standings[team_name] = rank
-                # Backup logo capture
                 logos['teams'][team_name] = row['team']['crest']
             print("✅ Done.")
         except:
@@ -176,7 +171,6 @@ for comp in COMPETITIONS:
                 'date': m['utcDate'],
                 'league': m['competition']['name']
             })
-            # Capture league logo if missed
             logos['leagues'][m['competition']['name']] = m['competition']['emblem']
         print(f"✅ Found {len(matches)}.")
     else:
@@ -187,8 +181,7 @@ for comp in COMPETITIONS:
 joblib.dump(team_history, 'team_history.pkl')
 joblib.dump(upcoming, 'upcoming_matches.pkl')
 joblib.dump(elo_ratings, 'elo_ratings.pkl')
-joblib.dump(model, 'logistic_model.pkl')
 joblib.dump(standings, 'standings.pkl')
-joblib.dump(logos, 'logos.pkl') # NEW FILE
+joblib.dump(logos, 'logos.pkl') 
 
-print("\n✅ DONE. Database with Logos Updated.")
+print("\n✅ DONE. Database Updated.")
