@@ -42,7 +42,14 @@ st.markdown("""
     /* Smart Insights List */
     .insight-list { font-size: 13px; color: #dfe6e9; margin-top: 10px; padding-left: 20px; }
     .insight-list li { margin-bottom: 4px; }
+
+    /* League Logo (Larger since text is gone) */
+    .league-img { width: 40px; height: 40px; margin-right: 8px; vertical-align: middle; }
     
+    /* Value Badges */
+    .value-badge { background-color: #00cc96; color: black; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 5px; }
+    .no-value-badge { background-color: #ff4b4b; color: white; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 5px; }
+
     .stRadio > label { font-size: 18px !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
@@ -69,11 +76,9 @@ with st.sidebar:
     st.divider()
 
 # ==========================================
-# 🧠 NEW: SMART LOGIC FUNCTIONS
+# 🧠 SMART LOGIC
 # ==========================================
-
 def get_confidence_tier(prob_win):
-    """Returns HTML badge for confidence level based on win %"""
     if prob_win >= 70:
         return "<span class='tier-diamond'>💎 DIAMOND TIER (High Confidence)</span>"
     elif prob_win >= 55:
@@ -82,38 +87,30 @@ def get_confidence_tier(prob_win):
         return "<span class='tier-silver'>🥈 SILVER TIER (Risky / Close Match)</span>"
 
 def get_smart_insights(team_name):
-    """Generates text bullets based on recent performance"""
     if team_name not in history: return []
-    
     insights = []
-    
-    # Get last 5 games
     scored = history[team_name]['all']['scored'][-5:]
     conceded = history[team_name]['all']['conceded'][-5:]
     
     if not scored: return []
 
-    # 1. Winning Streak
     wins = 0
     for s, c in zip(reversed(scored), reversed(conceded)):
         if s > c: wins += 1
         else: break
     if wins >= 3: insights.append(f"🔥 <b>{team_name}</b> is on a {wins}-game winning streak.")
     
-    # 2. Scoring Power
     avg_goals = np.mean(scored)
-    if avg_goals >= 2.0: insights.append(f"⚽ <b>{team_name}</b> is scoring heavily ({avg_goals:.1f} goals/game recently).")
+    if avg_goals >= 2.0: insights.append(f"⚽ <b>{team_name}</b> is scoring heavily ({avg_goals:.1f} goals/game).")
     
-    # 3. Defense (Clean Sheets)
     clean_sheets = conceded.count(0)
-    if clean_sheets >= 2: insights.append(f"🛡️ <b>{team_name}</b> has kept {clean_sheets} clean sheets in last 5 games.")
+    if clean_sheets >= 2: insights.append(f"🛡️ <b>{team_name}</b> kept {clean_sheets} clean sheets recently.")
     
-    # 4. Poor Form
     losses = 0
     for s, c in zip(reversed(scored), reversed(conceded)):
         if s < c: losses += 1
         else: break
-    if losses >= 3: insights.append(f"⚠️ <b>{team_name}</b> is struggling (lost last {losses} games).")
+    if losses >= 3: insights.append(f"⚠️ <b>{team_name}</b> lost last {losses} games.")
     
     return insights
 
@@ -218,26 +215,21 @@ if sport_mode == "⚽ Football":
             date_str = dt_cet.strftime("%d %b %H:%M") 
         except: date_str = match['date']
 
-        # Determine Confidence Tier
         max_prob = max(final_home, final_away)
         tier_badge = get_confidence_tier(max_prob)
-
-        # Generate Smart Insights
-        home_insights = get_smart_insights(home)
-        away_insights = get_smart_insights(away)
-        all_insights = home_insights + away_insights
+        all_insights = get_smart_insights(home) + get_smart_insights(away)
 
         # --- MATCH CARD ---
         with st.container():
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
-                st.markdown(tier_badge, unsafe_allow_html=True) # Confidence Tier
+                st.markdown(tier_badge, unsafe_allow_html=True)
+                # UPDATED: Text removed, only logo shown (with tooltip)
                 st.markdown(f"""
-                    <div class='league-title'><img src='{l_logo}' class='league-img'> {match['league']}</div>
+                    <div class='league-title'><img src='{l_logo}' class='league-img' title='{match['league']}'></div>
                     <span class='match-date'>📅 {date_str} (CET)</span>
                 """, unsafe_allow_html=True)
                 
-                # Teams
                 st.write("") 
                 st.markdown(f"""
                     <div class='team-row'><span class='rank-tag'>#{h_rank}</span><img src='{h_logo}' class='team-img'><span class='team-name'>{home}</span><span class='elo-tag' style='background-color:{h_elo_col}'>{h_elo_val}</span><span class='form-box'>{h_form}</span></div>
@@ -253,51 +245,58 @@ if sport_mode == "⚽ Football":
                 st.markdown("**Away Win**"); st.progress(int(final_away)); st.caption(f"{final_away:.1f}%")
                 st.markdown("**Draw**"); st.progress(int(final_draw)); st.caption(f"{final_draw:.1f}%")
 
+            with c3:
+                st.write("") 
+                st.markdown(f"<div class='stat-box'><div class='stat-label'>Over 2.5 Goals</div><div class='stat-value'>{prob_over:.1f}%</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stat-box'><div class='stat-label'>BTTS</div><div class='stat-value'>{prob_btts:.1f}%</div></div>", unsafe_allow_html=True)
             
-                with c3:
-                    st.write("") 
-                    st.markdown(f'<div class="stat-box"><div class="stat-label">Over 2.5 Goals</div><div class="stat-value">{prob_over:.1f}%</div></div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="stat-box"><div class="stat-label">BTTS</div><div class="stat-value">{prob_btts:.1f}%</div></div>', unsafe_allow_html=True)
-
-            
-            # --- EXPANDER: INSIGHTS & MOMENTUM ---
+            # --- EXPANDER: INSIGHTS & VALUE ---
             with st.expander("📊 Smart Insights & Value"):
-                # 1. Smart Insights Section
                 if all_insights:
                     st.markdown("**🧠 AI Smart Insights:**")
-                    insight_html = "<ul class='insight-list'>" + "".join([f"<li>{i}</li>" for i in all_insights]) + "</ul>"
-                    st.markdown(insight_html, unsafe_allow_html=True)
+                    st.markdown("<ul class='insight-list'>" + "".join([f"<li>{i}</li>" for i in all_insights]) + "</ul>", unsafe_allow_html=True)
                 else:
-                    st.caption("No strong statistical trends detected for these teams.")
+                    st.caption("No strong trends detected.")
                 
                 st.divider()
                 
-                # 2. Value Calculator
+                # UPDATED: Added Over/BTTS to Value Calculator
                 st.markdown("**💰 Value Calculator**")
-                vc1, vc2, vc3 = st.columns(3)
+                
                 def check_value(odds, prob):
                     if odds > 1:
                         edge = prob - (1/odds*100)
                         if edge > 0: st.markdown(f"<div class='value-badge'>💚 +{edge:.1f}%</div>", unsafe_allow_html=True)
                         else: st.markdown(f"<div class='no-value-badge'>🔻 {edge:.1f}%</div>", unsafe_allow_html=True)
 
-                with vc1: 
+                # Row 1: Match Result
+                c_h, c_d, c_a = st.columns(3)
+                with c_h: 
                     o = st.number_input("Home Odds", 0.0, key=f"h{home}")
                     check_value(o, final_home)
-                with vc2:
+                with c_d:
                     o = st.number_input("Draw Odds", 0.0, key=f"d{home}")
                     check_value(o, final_draw)
-                with vc3:
+                with c_a:
                     o = st.number_input("Away Odds", 0.0, key=f"a{home}")
                     check_value(o, final_away)
+                
+                st.write("") # Spacer
+                
+                # Row 2: Goals
+                c_o, c_b = st.columns(2)
+                with c_o:
+                    o = st.number_input("Over 2.5 Odds", 0.0, key=f"o25{home}")
+                    check_value(o, prob_over)
+                with c_b:
+                    o = st.number_input("BTTS (Yes) Odds", 0.0, key=f"btts{home}")
+                    check_value(o, prob_btts)
                 
                 st.divider()
                 st.caption("Elo Momentum (Last 15 Updates)")
                 
                 if home in elo_history and away in elo_history:
-                    h_hist = elo_history[home][-15:]
-                    a_hist = elo_history[away][-15:]
-                    chart_data = pd.DataFrame({home: h_hist, away: a_hist})
+                    chart_data = pd.DataFrame({home: elo_history[home][-15:], away: elo_history[away][-15:]})
                     st.line_chart(chart_data)
 
             st.divider()
