@@ -7,17 +7,18 @@ from datetime import datetime, timedelta
 from sklearn.linear_model import LogisticRegression
 
 # --- CONFIGURATION ---
-FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7"
-NBA_KEY = "544648ce-9eb1-48f4-8c8f-9f9951b8ca94"
+FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7" # Soccer
+NBA_KEY = "544648ce-9eb1-48f4-8c8f-9f9951b8ca94"      # Basketball
+NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016"      # American Football
 
-# --- FOOTBALL SETUP ---
+# --- HEADERS ---
 FOOTBALL_HEADERS = {'X-Auth-Token': FOOTBALL_KEY}
+NBA_HEADERS = {'Authorization': NBA_KEY}
+NFL_HEADERS = {'Ocp-Apim-Subscription-Key': NFL_KEY} # Standard format for NFL APIs
+
 COMPETITIONS = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'DED', 'PPL', 'CL']
 
-# --- NBA SETUP ---
-NBA_HEADERS = {'Authorization': NBA_KEY}
-
-print("🚀 STARTING MULTI-SPORT AI ENGINE...")
+print("🚀 STARTING MULTI-SPORT AI ENGINE (Soccer + NBA + NFL)...")
 
 # --- STORAGE ---
 team_history = {}
@@ -26,11 +27,9 @@ training_data = []
 standings = {}
 logos = {'leagues': {}, 'teams': {}} 
 
-# NBA Storage
-nba_data = {
-    'schedule': [],
-    'standings': {}
-}
+# Sport Specific Data
+nba_data = {'schedule': []}
+nfl_data = {'schedule': []}
 
 # --- HELPER FUNCTIONS ---
 def get_elo(team):
@@ -53,7 +52,7 @@ def init_team(team_name):
         team_history[team_name] = {'home': {'scored': [], 'conceded': []}, 'away': {'scored': [], 'conceded': []}, 'all': {'scored': [], 'conceded': []}}
         elo_ratings[team_name] = 1500 
 
-def smart_fetch(url, headers):
+def smart_fetch(url, headers=None):
     for i in range(3):
         try:
             res = requests.get(url, headers=headers)
@@ -66,12 +65,12 @@ def smart_fetch(url, headers):
     return None
 
 # ==========================================
-# ⚽ PART 1: FOOTBALL ENGINE
+# ⚽ PART 1: SOCCER ENGINE
 # ==========================================
-print("\n⚽ FOOTBALL: Analyzing History & Form...")
+print("\n⚽ FOOTBALL (Soccer): Analyzing...")
 
 for comp in COMPETITIONS:
-    print(f"   📡 Analyzing {comp}...", end=" ", flush=True)
+    print(f"   📡 League {comp}...", end=" ", flush=True)
     url = f"https://api.football-data.org/v4/competitions/{comp}/matches?status=FINISHED"
     data = smart_fetch(url, FOOTBALL_HEADERS)
     
@@ -114,13 +113,12 @@ for comp in COMPETITIONS:
             team_history[away]['all']['scored'].append(ag)
             team_history[away]['all']['conceded'].append(hg)
             
-        print(f"✅ {len(matches)} games.")
+        print(f"✅")
     else:
-        print("❌ Failed.")
-    time.sleep(2)
+        print("❌")
+    time.sleep(1)
 
-# Train Football Model
-print("   🧠 Training Football Brain...")
+# Train Model
 if training_data:
     df_train = pd.DataFrame(training_data)
     X = df_train[['elo_diff']]
@@ -129,8 +127,7 @@ if training_data:
     model.fit(X, y)
     joblib.dump(model, 'logistic_model.pkl')
 
-# Get Football Standings
-print("\n🏆 FOOTBALL: Fetching Standings...")
+# Soccer Standings
 for comp in COMPETITIONS:
     url = f"https://api.football-data.org/v4/competitions/{comp}/standings"
     data = smart_fetch(url, FOOTBALL_HEADERS)
@@ -141,14 +138,12 @@ for comp in COMPETITIONS:
                 standings[row['team']['name']] = row['position']
                 logos['teams'][row['team']['name']] = row['team']['crest']
         except: pass
-    time.sleep(2)
+    time.sleep(1)
 
-# Get Football Schedule
-print("\n📅 FOOTBALL: Fetching Schedule...")
+# Soccer Schedule
 upcoming = []
 today_str = datetime.now().strftime('%Y-%m-%d')
 future_str = (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d')
-
 for comp in COMPETITIONS:
     url = f"https://api.football-data.org/v4/competitions/{comp}/matches?status=SCHEDULED&dateFrom={today_str}&dateTo={future_str}"
     data = smart_fetch(url, FOOTBALL_HEADERS)
@@ -162,53 +157,75 @@ for comp in COMPETITIONS:
                 'league': m['competition']['name']
             })
             logos['leagues'][m['competition']['name']] = m['competition']['emblem']
-    time.sleep(2)
+    time.sleep(1)
 
 # ==========================================
-# 🏀 PART 2: BASKETBALL ENGINE (NBA)
+# 🏀 PART 2: NBA ENGINE
 # ==========================================
-print("\n🏀 NBA: Connecting to Balldontlie API...")
-
-# 1. Fetch Schedule (Next 5 Days)
+print("\n🏀 BASKETBALL (NBA): Fetching Schedule...")
 dates = []
 for i in range(5):
     d = (datetime.now() + timedelta(days=i)).strftime('%Y-%m-%d')
     dates.append(f"dates[]={d}")
 date_query = "&".join(dates)
 
-url_nba_games = f"https://api.balldontlie.io/v1/games?{date_query}"
-nba_games_data = smart_fetch(url_nba_games, NBA_HEADERS)
+url_nba = f"https://api.balldontlie.io/v1/games?{date_query}"
+nba_res = smart_fetch(url_nba, NBA_HEADERS)
 
-if nba_games_data:
-    games = nba_games_data.get('data', [])
-    print(f"   📅 Found {len(games)} upcoming NBA games.")
-    
+if nba_res:
+    games = nba_res.get('data', [])
+    print(f"   ✅ Found {len(games)} NBA games.")
     for g in games:
-        # Filter only scheduled games (status might be time string or 'Scheduled')
         nba_data['schedule'].append({
             'home': g['home_team']['full_name'],
             'away': g['visitor_team']['full_name'],
-            'date': g['date'] + "T" + g['status'], # Rough timestamp combination
+            'date': g['date'] + "T" + g['status'], 
             'id': g['id']
         })
 else:
-    print("   ❌ Failed to fetch NBA schedule.")
+    print("   ❌ Failed.")
 
-# 2. Fetch Team Stats/Standings (For Prediction)
-# We fetch all teams to get their wins/losses
-print("   📊 Fetching NBA Team Records...")
-# Note: Balldontlie doesn't have a direct 'standings' endpoint on free tier sometimes, 
-# but 'teams' endpoint is static. We need to check if we can get records.
-# Actually, the best way on standard tier is usually getting game results, 
-# but to keep it simple we'll assume equal start or basic random if standings fail.
-# UPDATE: Let's try to scrape a "Standings" equivalent or just use the games to predict later.
-# Wait, Balldontlie v1 DOES have a simple teams endpoint, but no win/loss record attached directly.
-# To solve this: We will just save the schedule. In the dashboard, we will do a '50/50' visual 
-# or try to fetch standings if possible.
-# BETTER PLAN: We will create a manual map of current top teams for 'seed' rating or simply skip standings for V1.
+# ==========================================
+# 🏈 PART 3: NFL ENGINE (NEW)
+# ==========================================
+print("\n🏈 NFL: Fetching Schedule & Odds...")
 
-# Let's just save the schedule for now. Real predictions require deeper stats integration.
-pass 
+# We use a reliable public endpoint for NFL scores that works reliably without complex setups
+# This gets live/upcoming NFL games
+url_nfl = "http://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+
+nfl_res = smart_fetch(url_nfl, headers={}) # Public feed
+
+if nfl_res:
+    events = nfl_res.get('events', [])
+    print(f"   ✅ Found {len(events)} NFL events.")
+    
+    for event in events:
+        try:
+            comp = event['competitions'][0]
+            home_team = next(t for t in comp['competitors'] if t['homeAway'] == 'home')
+            away_team = next(t for t in comp['competitors'] if t['homeAway'] == 'away')
+            
+            # Get Odds (Spread) if available
+            odds_str = "0.0"
+            if 'odds' in comp and len(comp['odds']) > 0:
+                odds_str = comp['odds'][0].get('details', '0.0') # e.g. "DAL -3.5"
+            
+            nfl_data['schedule'].append({
+                'home': home_team['team']['displayName'],
+                'away': away_team['team']['displayName'],
+                'home_logo': home_team['team'].get('logo', ''),
+                'away_logo': away_team['team'].get('logo', ''),
+                'date': event['date'], # ISO format
+                'odds': odds_str,
+                'home_score': home_team.get('score', '0'),
+                'away_score': away_team.get('score', '0'),
+                'status': event['status']['type']['state'] # pre, in, post
+            })
+        except:
+            continue
+else:
+    print("   ❌ Failed.")
 
 # --- SAVE EVERYTHING ---
 joblib.dump(team_history, 'team_history.pkl')
@@ -216,6 +233,7 @@ joblib.dump(upcoming, 'upcoming_matches.pkl')
 joblib.dump(elo_ratings, 'elo_ratings.pkl')
 joblib.dump(standings, 'standings.pkl')
 joblib.dump(logos, 'logos.pkl') 
-joblib.dump(nba_data, 'nba_data.pkl') # NEW FILE
+joblib.dump(nba_data, 'nba_data.pkl') 
+joblib.dump(nfl_data, 'nfl_data.pkl') # NEW FILE
 
-print("\n✅ DONE. Multi-Sport Database Updated.")
+print("\n✅ DONE. Database Updated.")
