@@ -14,6 +14,13 @@ st.markdown("""
     /* Card Styles */
     .match-card { background-color: #262730; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #444; }
     
+    /* Top Picks Box */
+    .top-picks-box { background-color: #1e272e; padding: 15px; border-radius: 10px; border: 1px solid #0abde3; margin-bottom: 25px; }
+    .top-picks-header { color: #0abde3; font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+    .pick-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding: 8px 0; }
+    .pick-match { font-size: 14px; font-weight: bold; color: white; }
+    .pick-badge { background-color: #0abde3; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+    
     /* Sport Specific Colors */
     .nfl-header { color: #5bc0de; font-weight: bold; font-size: 14px; text-transform: uppercase; }
     
@@ -43,7 +50,6 @@ st.markdown("""
     .insight-list { font-size: 13px; color: #dfe6e9; margin-top: 10px; padding-left: 20px; }
     .insight-list li { margin-bottom: 4px; }
 
-    /* League Logo (Larger since text is gone) */
     .league-img { width: 40px; height: 40px; margin-right: 8px; vertical-align: middle; }
     
     /* Value Badges */
@@ -120,12 +126,12 @@ def get_smart_insights(team_name):
 if sport_mode == "⚽ Football":
     upcoming.sort(key=lambda x: x['date']) 
 
+    # --- NEW: ELO COLORS (NO YELLOW) ---
     def get_elo_color(rating):
-        if rating >= 1800: return "#0abde3" 
-        if rating >= 1650: return "#1dd1a1" 
-        if rating >= 1500: return "#feca57" 
-        if rating >= 1350: return "#ff9f43" 
-        return "#ff6b6b"                    
+        if rating >= 1800: return "#0abde3" # Cyan (Elite)
+        if rating >= 1600: return "#1dd1a1" # Green (Strong)
+        if rating >= 1450: return "#ff9f43" # Orange (Average) - Replaced Yellow
+        return "#ff6b6b"                    # Red (Weak)
 
     def get_form_html(team):
         if team not in history: return ""
@@ -170,7 +176,65 @@ if sport_mode == "⚽ Football":
         return prob_h/total, prob_d/total, prob_a/total
 
     st.title("⚽ Football Predictor")
+
+    # --- 🧠 CALCULATE TOP PREDICTIONS ---
+    all_predictions = []
     
+    # Pre-calculate predictions for ALL upcoming matches
+    for match in upcoming:
+        if match['home'] not in history or match['away'] not in history: continue
+        
+        p_h, p_d, p_a, _, _, _, _ = get_poisson_probs(match['home'], match['away'])
+        l_h, l_d, l_a = get_logistic_probs(match['home'], match['away'])
+        e_h, e_d, e_a = get_elo_probs(match['home'], match['away'])
+        
+        final_home = (p_h + l_h + e_h) / 3 * 100
+        final_draw = (p_d + l_d + e_d) / 3 * 100
+        final_away = (p_a + l_a + e_a) / 3 * 100
+        
+        # Determine best outcome
+        if final_home > final_away and final_home > final_draw:
+            outcome = f"Home Win ({match['home']})"
+            conf = final_home
+        elif final_away > final_home and final_away > final_draw:
+            outcome = f"Away Win ({match['away']})"
+            conf = final_away
+        else:
+            outcome = "Draw"
+            conf = final_draw
+            
+        all_predictions.append({
+            'match': f"{match['home']} vs {match['away']}",
+            'outcome': outcome,
+            'confidence': conf,
+            'league': match['league']
+        })
+
+    # Sort by Confidence
+    all_predictions.sort(key=lambda x: x['confidence'], reverse=True)
+    top_3 = all_predictions[:3]
+
+    # --- DISPLAY TOP PREDICTIONS WIDGET ---
+    if top_3:
+        st.markdown("""
+        <div class="top-picks-box">
+            <div class="top-picks-header">🔥 Top 3 AI Picks of the Week</div>
+        """, unsafe_allow_html=True)
+        
+        for pick in top_3:
+            st.markdown(f"""
+            <div class="pick-row">
+                <span class="pick-match">{pick['match']} <span style='color:#888; font-size:12px; margin-left:10px'>({pick['league']})</span></span>
+                <div>
+                    <span style="color:#aaa; font-size:12px; margin-right:10px;">Predicted: {pick['outcome']}</span>
+                    <span class="pick-badge">{pick['confidence']:.1f}% Confidence</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # --- MAIN FILTER & LIST ---
     leagues = sorted(list(set([m['league'] for m in upcoming])))
     default_sel = [l for l in leagues if "Premier League" in l or "Bundesliga" in l]
     sel_league = st.multiselect("Filter League", leagues, default=default_sel if default_sel else leagues[:2])
@@ -224,7 +288,6 @@ if sport_mode == "⚽ Football":
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
                 st.markdown(tier_badge, unsafe_allow_html=True)
-                # UPDATED: Text removed, only logo shown (with tooltip)
                 st.markdown(f"""
                     <div class='league-title'><img src='{l_logo}' class='league-img' title='{match['league']}'></div>
                     <span class='match-date'>📅 {date_str} (CET)</span>
@@ -250,7 +313,6 @@ if sport_mode == "⚽ Football":
                 st.markdown(f"<div class='stat-box'><div class='stat-label'>Over 2.5 Goals</div><div class='stat-value'>{prob_over:.1f}%</div></div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='stat-box'><div class='stat-label'>BTTS</div><div class='stat-value'>{prob_btts:.1f}%</div></div>", unsafe_allow_html=True)
             
-            # --- EXPANDER: INSIGHTS & VALUE ---
             with st.expander("📊 Smart Insights & Value"):
                 if all_insights:
                     st.markdown("**🧠 AI Smart Insights:**")
@@ -259,17 +321,14 @@ if sport_mode == "⚽ Football":
                     st.caption("No strong trends detected.")
                 
                 st.divider()
-                
-                # UPDATED: Added Over/BTTS to Value Calculator
                 st.markdown("**💰 Value Calculator**")
-                
                 def check_value(odds, prob):
                     if odds > 1:
                         edge = prob - (1/odds*100)
                         if edge > 0: st.markdown(f"<div class='value-badge'>💚 +{edge:.1f}%</div>", unsafe_allow_html=True)
                         else: st.markdown(f"<div class='no-value-badge'>🔻 {edge:.1f}%</div>", unsafe_allow_html=True)
 
-                # Row 1: Match Result
+                # Value Rows (Home/Draw/Away + Over/BTTS)
                 c_h, c_d, c_a = st.columns(3)
                 with c_h: 
                     o = st.number_input("Home Odds", 0.0, key=f"h{home}")
@@ -281,9 +340,7 @@ if sport_mode == "⚽ Football":
                     o = st.number_input("Away Odds", 0.0, key=f"a{home}")
                     check_value(o, final_away)
                 
-                st.write("") # Spacer
-                
-                # Row 2: Goals
+                st.write("") 
                 c_o, c_b = st.columns(2)
                 with c_o:
                     o = st.number_input("Over 2.5 Odds", 0.0, key=f"o25{home}")
@@ -294,7 +351,6 @@ if sport_mode == "⚽ Football":
                 
                 st.divider()
                 st.caption("Elo Momentum (Last 15 Updates)")
-                
                 if home in elo_history and away in elo_history:
                     chart_data = pd.DataFrame({home: elo_history[home][-15:], away: elo_history[away][-15:]})
                     st.line_chart(chart_data)
