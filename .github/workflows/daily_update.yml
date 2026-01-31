@@ -25,7 +25,12 @@ jobs:
         run: |
           pip install requests pandas numpy scikit-learn joblib
 
-      - name: Run AI Engine
+      # 4. Run the AI Brain
+      - name: Run Training Script
+        env:  # <--- THIS PASSES THE SECRETS TO PYTHON
+          FOOTBALL_KEY: ${{ secrets.FOOTBALL_KEY }}
+          NBA_KEY: ${{ secrets.NBA_KEY }}
+          NFL_KEY: ${{ secrets.NFL_KEY }}
         run: python train_ai.py
 
       - name: Commit and Push Data
