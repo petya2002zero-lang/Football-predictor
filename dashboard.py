@@ -56,7 +56,10 @@ st.markdown("""
     .value-badge { background-color: #00cc96; color: black; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 5px; }
     .no-value-badge { background-color: #ff4b4b; color: white; padding: 5px; border-radius: 5px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 5px; }
 
+    /* Sidebar Radio Styling */
     .stRadio > label { font-size: 18px !important; font-weight: bold; }
+    .disabled-sport { color: #555; margin-left: 2px; margin-top: 8px; font-size: 14px; cursor: not-allowed; display: flex; align-items: center;}
+    .disabled-icon { opacity: 0.5; margin-right: 8px; font-size: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,7 +90,16 @@ except:
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🏆 Sport Selection")
-    sport_mode = st.radio("", ["⚽ Football", "🏀 Basketball (NBA)", "🏈 American Football (NFL)"])
+    
+    # Active Selection
+    sport_mode = st.radio("", ["⚽ Football"])
+
+    # Disabled Options (Visual Only)
+    st.markdown("""
+    <div class="disabled-sport"><span class="disabled-icon">🏀</span> Basketball (Coming Soon)</div>
+    <div class="disabled-sport"><span class="disabled-icon">🏈</span> American Football (Coming Soon)</div>
+    """, unsafe_allow_html=True)
+
     st.divider()
 
 # ==========================================
@@ -385,61 +397,4 @@ if sport_mode == "⚽ Football":
                     chart_data = pd.DataFrame({home: elo_history[home][-15:], away: elo_history[away][-15:]})
                     st.line_chart(chart_data)
 
-            st.divider()
-
-# ==========================================
-# 🏀 BASKETBALL LOGIC
-# ==========================================
-elif sport_mode == "🏀 Basketball (NBA)":
-    st.title("🏀 NBA Predictor")
-    schedule = nba_data.get('schedule', [])
-    if not schedule: st.info("No games found.")
-    
-    for match in schedule:
-        try: date_str = datetime.strptime(match['date'].split("T")[0], "%Y-%m-%d").strftime("%d %b")
-        except: date_str = match['date']
-        
-        with st.container():
-            c1, c2, c3 = st.columns([3, 2, 2])
-            with c1:
-                st.markdown(f"<div class='league-title'>NBA</div><span class='match-date'>📅 {date_str}</span>", unsafe_allow_html=True)
-                st.markdown(f"<h3>{match['home']} vs {match['away']}</h3>", unsafe_allow_html=True)
-            with c2:
-                st.markdown("**Home Win**"); st.progress(50); st.caption("50%")
-                st.markdown("**Away Win**"); st.progress(50); st.caption("50%")
-            with c3:
-                st.info("Stats Loading...")
-            st.divider()
-
-# ==========================================
-# 🏈 NFL LOGIC
-# ==========================================
-elif sport_mode == "🏈 American Football (NFL)":
-    st.title("🏈 NFL Predictor")
-    schedule = nfl_data.get('schedule', [])
-    if not schedule: st.info("No games found.")
-    
-    for match in schedule:
-        home, away, odds = match['home'], match['away'], match['odds']
-        h_prob = 50
-        try:
-            if "-" in odds: val = float(odds.split(" ")[-1]); h_prob = 50 + (abs(val)*3) if val < 0 else 50 - (abs(val)*3)
-        except: pass
-        if h_prob > 95: h_prob = 95; 
-        if h_prob < 5: h_prob = 5
-        a_prob = 100 - h_prob
-
-        try: date_str = datetime.strptime(match['date'], "%Y-%m-%dT%H:%MZ").replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d %b %H:%M")
-        except: date_str = match['date']
-
-        with st.container():
-            c1, c2, c3 = st.columns([3, 2, 2])
-            with c1:
-                st.markdown(f"<div class='nfl-header'>NFL</div><span class='match-date'>📅 {date_str} (CET)</span>", unsafe_allow_html=True)
-                st.markdown(f"<div class='team-row'><img src='{match['home_logo']}' class='team-img'><span class='team-name'>{home}</span></div><div class='team-row'><img src='{match['away_logo']}' class='team-img'><span class='team-name'>{away}</span></div>", unsafe_allow_html=True)
-            with c2:
-                st.markdown("**Home Win**"); st.progress(int(h_prob)); st.caption(f"{h_prob:.0f}%")
-                st.markdown("**Away Win**"); st.progress(int(a_prob)); st.caption(f"{a_prob:.0f}%")
-            with c3:
-                st.write(""); st.markdown(f"<div class='stat-box'><div class='stat-label'>Spread</div><div class='stat-value' style='color:#5bc0de'>{odds}</div></div>", unsafe_allow_html=True)
             st.divider()
