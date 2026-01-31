@@ -3,18 +3,26 @@ import joblib
 import time
 import pandas as pd
 import numpy as np
+import os  # <--- IMPORT OS to read environment variables
 from datetime import datetime, timedelta
 from sklearn.linear_model import LogisticRegression
 
 # --- CONFIGURATION ---
-FOOTBALL_KEY = "3f86c808c5fb455f8dfcab765b8053c7"
-NBA_KEY = "44ca299f-090c-4292-b873-f4633452c016"
-NFL_KEY = "44ca299f-090c-4292-b873-f4633452c016" 
+# Now we get keys from the secure vault (Environment Variables)
+FOOTBALL_KEY = os.environ.get("FOOTBALL_KEY")
+NBA_KEY = os.environ.get("NBA_KEY")
+NFL_KEY = os.environ.get("NFL_KEY")
+
+# Check if keys exist (prevents crashing if you forget to set them locally)
+if not FOOTBALL_KEY:
+    print("⚠️ Error: FOOTBALL_KEY not found. Set it in GitHub Secrets or .env")
+    # You could set a fallback here for local testing if you want, but better to use .env
 
 # --- HEADERS ---
 FOOTBALL_HEADERS = {'X-Auth-Token': FOOTBALL_KEY}
 NBA_HEADERS = {'Authorization': NBA_KEY}
 NFL_HEADERS = {'Ocp-Apim-Subscription-Key': NFL_KEY}
+
 
 COMPETITIONS = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'DED', 'PPL', 'CL']
 
