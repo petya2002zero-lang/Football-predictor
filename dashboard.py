@@ -186,13 +186,27 @@ if sport_mode == "⚽ Football":
 
     st.title("⚽ Football Predictor")
 
-    # --- 🧠 TOP PREDICTIONS WIDGET ---
+    # --- 🧠 TOP PREDICTIONS (DAILY FILTER) ---
     all_predictions = []
     
-    # Pre-calculate predictions for ALL upcoming matches
+    # Get Today's Date in CET
+    now_cet = datetime.now(ZoneInfo("Europe/Berlin"))
+    today_date = now_cet.date()
+    
     for match in upcoming:
         if match['home'] not in history or match['away'] not in history: continue
         
+        # Parse Match Date
+        try:
+            m_dt = datetime.strptime(match['date'], "%Y-%m-%dT%H:%M:%SZ")
+            m_date_cet = m_dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Berlin")).date()
+        except: continue
+
+        # FILTER: ONLY TODAY
+        if m_date_cet != today_date:
+            continue
+        
+        # Run Calc
         p_h, p_d, p_a, _, _, _, _ = get_poisson_probs(match['home'], match['away'])
         l_h, l_d, l_a = get_logistic_probs(match['home'], match['away'])
         e_h, e_d, e_a = get_elo_probs(match['home'], match['away'])
@@ -222,9 +236,9 @@ if sport_mode == "⚽ Football":
     top_3 = all_predictions[:3]
 
     if top_3:
-        st.markdown("""
+        st.markdown(f"""
         <div class="top-picks-box">
-            <div class="top-picks-header">🔥 Top 3 AI Picks of the Week</div>
+            <div class="top-picks-header">🔥 Top Picks for the Day ({today_date.strftime('%d %b')})</div>
         """, unsafe_allow_html=True)
         
         for pick in top_3:
@@ -247,16 +261,15 @@ if sport_mode == "⚽ Football":
     # 1. League Filter
     sel_league = st.multiselect("Filter League", leagues, default=default_sel if default_sel else leagues[:2])
     
-    # 2. Search Bar (NEW)
+    # 2. Search Bar
     search_team = st.text_input("🔍 Search Team", placeholder="e.g. Real Madrid, Arsenal...")
     
     st.divider()
 
     for match in upcoming:
-        # League Filter
         if match['league'] not in sel_league: continue
         
-        # Search Filter (NEW)
+        # Search Filter
         if search_team:
             if search_team.lower() not in match['home'].lower() and search_team.lower() not in match['away'].lower():
                 continue
@@ -306,7 +319,6 @@ if sport_mode == "⚽ Football":
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
                 st.markdown(tier_badge, unsafe_allow_html=True)
-                # League Logo with Tooltip (Hover for Name)
                 st.markdown(f"""
                     <div class='league-title'><img src='{l_logo}' class='league-img' title='{match['league']}'></div>
                     <span class='match-date'>📅 {date_str} (CET)</span>
