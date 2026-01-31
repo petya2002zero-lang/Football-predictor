@@ -70,7 +70,16 @@ try:
     standings = joblib.load('standings.pkl')
     logos = joblib.load('logos.pkl') 
     nba_data = joblib.load('nba_data.pkl') 
-    nfl_data = joblib.load('nfl_data.pkl') 
+    nfl_data = joblib.load('nfl_data.pkl')
+    
+    # --- RENAME FIX (Primera Division -> LALIGA) ---
+    for m in upcoming:
+        if m['league'] == "Primera Division":
+            m['league'] = "LALIGA"
+            
+    if 'Primera Division' in logos['leagues']:
+        logos['leagues']['LALIGA'] = logos['leagues'].pop('Primera Division')
+
 except:
     st.error("⚠️ Data missing. Run 'python train_ai.py' first.")
     st.stop()
@@ -126,11 +135,11 @@ def get_smart_insights(team_name):
 if sport_mode == "⚽ Football":
     upcoming.sort(key=lambda x: x['date']) 
 
-    # --- NEW: ELO COLORS (NO YELLOW) ---
+    # --- ELO COLORS ---
     def get_elo_color(rating):
         if rating >= 1800: return "#0abde3" # Cyan (Elite)
         if rating >= 1600: return "#1dd1a1" # Green (Strong)
-        if rating >= 1450: return "#ff9f43" # Orange (Average) - Replaced Yellow
+        if rating >= 1450: return "#ff9f43" # Orange (Average)
         return "#ff6b6b"                    # Red (Weak)
 
     def get_form_html(team):
@@ -177,7 +186,7 @@ if sport_mode == "⚽ Football":
 
     st.title("⚽ Football Predictor")
 
-    # --- 🧠 CALCULATE TOP PREDICTIONS ---
+    # --- 🧠 TOP PREDICTIONS WIDGET ---
     all_predictions = []
     
     # Pre-calculate predictions for ALL upcoming matches
@@ -192,7 +201,6 @@ if sport_mode == "⚽ Football":
         final_draw = (p_d + l_d + e_d) / 3 * 100
         final_away = (p_a + l_a + e_a) / 3 * 100
         
-        # Determine best outcome
         if final_home > final_away and final_home > final_draw:
             outcome = f"Home Win ({match['home']})"
             conf = final_home
@@ -210,11 +218,9 @@ if sport_mode == "⚽ Football":
             'league': match['league']
         })
 
-    # Sort by Confidence
     all_predictions.sort(key=lambda x: x['confidence'], reverse=True)
     top_3 = all_predictions[:3]
 
-    # --- DISPLAY TOP PREDICTIONS WIDGET ---
     if top_3:
         st.markdown("""
         <div class="top-picks-box">
@@ -234,14 +240,26 @@ if sport_mode == "⚽ Football":
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # --- MAIN FILTER & LIST ---
+    # --- LEAGUE FILTER & SEARCH ---
     leagues = sorted(list(set([m['league'] for m in upcoming])))
-    default_sel = [l for l in leagues if "Premier League" in l or "Bundesliga" in l]
+    default_sel = [l for l in leagues if "Premier League" in l or "Bundesliga" in l or "LALIGA" in l]
+    
+    # 1. League Filter
     sel_league = st.multiselect("Filter League", leagues, default=default_sel if default_sel else leagues[:2])
+    
+    # 2. Search Bar (NEW)
+    search_team = st.text_input("🔍 Search Team", placeholder="e.g. Real Madrid, Arsenal...")
+    
     st.divider()
 
     for match in upcoming:
+        # League Filter
         if match['league'] not in sel_league: continue
+        
+        # Search Filter (NEW)
+        if search_team:
+            if search_team.lower() not in match['home'].lower() and search_team.lower() not in match['away'].lower():
+                continue
         
         home = match['home']
         away = match['away']
@@ -288,6 +306,7 @@ if sport_mode == "⚽ Football":
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
                 st.markdown(tier_badge, unsafe_allow_html=True)
+                # League Logo with Tooltip (Hover for Name)
                 st.markdown(f"""
                     <div class='league-title'><img src='{l_logo}' class='league-img' title='{match['league']}'></div>
                     <span class='match-date'>📅 {date_str} (CET)</span>
@@ -328,7 +347,6 @@ if sport_mode == "⚽ Football":
                         if edge > 0: st.markdown(f"<div class='value-badge'>💚 +{edge:.1f}%</div>", unsafe_allow_html=True)
                         else: st.markdown(f"<div class='no-value-badge'>🔻 {edge:.1f}%</div>", unsafe_allow_html=True)
 
-                # Value Rows (Home/Draw/Away + Over/BTTS)
                 c_h, c_d, c_a = st.columns(3)
                 with c_h: 
                     o = st.number_input("Home Odds", 0.0, key=f"h{home}")
