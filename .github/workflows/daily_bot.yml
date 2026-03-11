@@ -71,7 +71,7 @@ jobs:
           git config --global user.name  "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           git pull --rebase origin main || true
-          git add database.sqlite
+          git add -f database.sqlite
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "🤖 Auto-update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push origin main
@@ -80,7 +80,7 @@ jobs:
         if: github.event.inputs.retrain_models == 'true'
         run: |
           git pull --rebase origin main || true
-          git add xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib
+          git add -f xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib
           git diff --cached --quiet && echo "No model changes" && exit 0
           git commit -m "🧠 Retrained models $(date -u '+%Y-%m-%d')"
           git push origin main

@@ -24,6 +24,10 @@ streamlit run dashboard.py
 
 No test suite exists. Validate changes by running `python -m py_compile <file>.py` before executing.
 
+## Gitignored Files
+
+`.gitignore` excludes `venv/`, `__pycache__/`, `*.sqlite`, `*.joblib`, `*.7z`, `hf_data.json`, and `.env`. These files are generated locally by the pipeline and should not be committed manually. The CI workflow uses `git add -f` to force-commit `database.sqlite` and `.joblib` model files on the `main` branch.
+
 ## Utility Scripts
 
 - **`check_db.py`** — Runs SQLite `PRAGMA integrity_check`; deletes `database.sqlite` if corrupted so the next `train_master.py` run rebuilds it cleanly.
@@ -223,8 +227,8 @@ new_derived = base_a - base_b
 ## CI/CD
 
 `.github/workflows/daily_bot.yml` runs twice daily (07:00 and 13:00 UTC):
-- Always runs `train_master.py` and commits `database.sqlite`
-- Runs `train_ml.py` and commits all 7 `.joblib` files only when triggered with `retrain_models=true`
+- Always runs `train_master.py` and force-commits `database.sqlite` (gitignored locally, `git add -f` in CI)
+- Runs `train_ml.py` and force-commits all 7 `.joblib` files only when triggered with `retrain_models=true`
 - Syncs to Hugging Face Spaces via force-push to `hf-deploy` branch (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
 
 Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
