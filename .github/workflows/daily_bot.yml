@@ -1,0 +1,126 @@
+name: Daily Sports Data Update
+
+on:
+  schedule:
+    - cron: '0 7 * * *'    # 07:00 UTC = 08:00 CET (UTC+1) / 09:00 CEST (UTC+2)
+    - cron: '0 13 * * *'   # 13:00 UTC — afternoon top-up for evening fixtures
+  workflow_dispatch:
+    inputs:
+      retrain_models:
+        description: 'Retrain ML models after data update?'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Master Data Engine
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          # Validate database.sqlite before running — delete if corrupted
+          python3 -c "
+          import sqlite3, os
+          db = 'database.sqlite'
+          if os.path.exists(db):
+              try:
+                  c = sqlite3.connect(db)
+                  c.execute('PRAGMA integrity_check')
+                  c.close()
+                  print('DB OK')
+              except sqlite3.DatabaseError:
+                  print('DB corrupted — removing.')
+                  os.remove(db)
+          "
+          python train_master.py
+
+      - name: Retrain ML Models
+        if: github.event.inputs.retrain_models == 'true'
+        run: python train_ml.py
+
+      - name: Commit database
+        run: |
+          git config --global user.name  "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git pull --rebase origin main || true
+          git add database.sqlite
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "🤖 Auto-update $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push origin main
+
+      - name: Commit retrained models
+        if: github.event.inputs.retrain_models == 'true'
+        run: |
+          git pull --rebase origin main || true
+          git add xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib
+          git diff --cached --quiet && echo "No model changes" && exit 0
+          git commit -m "🧠 Retrained models $(date -u '+%Y-%m-%d')"
+          git push origin main
+
+      # Push a clean single-commit snapshot to HF — no history, no large blobs
+      - name: Sync to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.name  "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+          # Stage all current files into a temp index
+          WORK=$(mktemp -d)
+          git worktree add "$WORK" --detach
+
+          cd "$WORK"
+
+          # Start a brand-new orphan branch — zero history
+          git checkout --orphan hf-deploy
+          git rm -rf . --quiet
+
+          # Copy everything from the repo except legacy pkl files
+          rsync -a --exclude='.git' --exclude='home_goals_model.pkl' \
+                --exclude='away_goals_model.pkl' \
+                "$GITHUB_WORKSPACE/" .
+
+          # Write a .gitattributes so HF treats large files as LFS
+          cat > .gitattributes << 'ATTRS'
+          *.sqlite filter=lfs diff=lfs merge=lfs -text
+          *.joblib filter=lfs diff=lfs merge=lfs -text
+          *.pkl    filter=lfs diff=lfs merge=lfs -text
+          ATTRS
+
+          git lfs install
+          git add .
+          git commit -m "🚀 Deploy $(date -u '+%Y-%m-%d %H:%M UTC')"
+
+          git remote add hf https://P3tya:$HF_TOKEN@huggingface.co/spaces/P3tya/FootballPredictor
+          git push hf hf-deploy:main --force
+
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove "$WORK" --force

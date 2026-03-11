@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(python -m py_compile train_ml.py)",
+      "Bash(python -m py_compile train_master.py)",
+      "Bash(python train_ml.py)",
+      "Bash(python -c \"import xgboost; print\\(''xgboost'', xgboost.__version__\\); import sklearn; print\\(''sklearn'', sklearn.__version__\\)\")",
+      "Bash(ls /c/Users/petya/Desktop/FootballAI/*.py /c/Users/petya/Desktop/FootballAI/*.txt /c/Users/petya/Desktop/FootballAI/*.cfg /c/Users/petya/Desktop/FootballAI/*.toml /c/Users/petya/Desktop/FootballAI/*.ini)",
+      "Bash(python3:*)"
+    ]
+  }
+}
