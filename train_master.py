@@ -257,6 +257,20 @@ def _find_pi_ratings_class():
     Returns the class (not an instance), or None if not found.
     """
     import importlib, pkgutil, inspect
+    # 0. Direct importlib import — most reliable, forces submodule to load
+    for mod_path, cls_name in [
+        ("penaltyblog.ratings", "PiRatingSystem"),
+        ("penaltyblog.ratings", "PiRatings"),
+        ("penaltyblog.models",  "PiRatings"),
+    ]:
+        try:
+            mod = importlib.import_module(mod_path)
+            cls = getattr(mod, cls_name, None)
+            if cls and inspect.isclass(cls):
+                log.info("penaltyblog: found %s in %s (direct import)", cls_name, mod_path)
+                return cls
+        except Exception:
+            continue
     # 1. Known explicit paths — fastest path for common versions
     for attr_path in [
         "ratings.PiRatingSystem",
@@ -313,6 +327,32 @@ def _try_fit_pi_ratings(cls, df):
             continue
     if instance is None:
         log.warning("penaltyblog PiRatings: no constructor signature matched.")
+        return None
+
+    # v1.9.0 API: no fit() method — uses update_ratings() per match
+    if hasattr(instance, "update_ratings") and not hasattr(instance, "fit"):
+        for _, row in df.iterrows():
+            try:
+                instance.update_ratings(
+                    home_team=str(row["home"]),
+                    away_team=str(row["away"]),
+                    observed_goal_difference=int(row["home_goals"]) - int(row["away_goals"]),
+                    date=row.get("date"),
+                )
+            except Exception:
+                continue
+        for getter in [
+            lambda m: {t: float(m.get_team_rating(t)) for t in m.team_ratings},
+            lambda m: {t: float(v.get("home", 0) + v.get("away", 0)) / 2
+                       for t, v in m.team_ratings.items()},
+        ]:
+            try:
+                result = getter(instance)
+                if isinstance(result, dict) and result:
+                    return result
+            except Exception:
+                continue
+        log.warning("penaltyblog PiRatingSystem v1.9.0: could not extract ratings.")
         return None
 
     # Try all known fit() call patterns
