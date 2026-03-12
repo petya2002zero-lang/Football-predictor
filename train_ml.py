@@ -44,10 +44,10 @@ from sklearn.preprocessing import StandardScaler
 try:
     import lightgbm as lgb
 
-    class _LGBMFloat64(lgb.LGBMClassifier):
-        """Wraps predict_proba to return float64 — sklearn 1.8 sigmoid calibration requires it."""
+    class _LGBMFloat32(lgb.LGBMClassifier):
+        """Wraps predict_proba to return float32 — matches X dtype for sklearn calibration."""
         def predict_proba(self, X, **kwargs):
-            return super().predict_proba(X, **kwargs).astype(float)
+            return super().predict_proba(X, **kwargs).astype(np.float32)
 
     LGB_AVAILABLE = True
 except ImportError:
@@ -511,7 +511,7 @@ else:
 # Build combined sample weights: real (time-decay) + synthetic (down-weighted)
 sample_weights = np.array(
     real_weights + [SYNTHETIC_WEIGHT] * n_needed,
-    dtype=np.float64,
+    dtype=np.float32,
 )
 
 df = pd.DataFrame(dataset)
@@ -630,7 +630,7 @@ if LGB_AVAILABLE:
                 reg_alpha        = trial.suggest_float("reg_alpha", 0.0, 3.0),
                 reg_lambda       = trial.suggest_float("reg_lambda", 0.0, 8.0),
             )
-            clf = _LGBMFloat64(
+            clf = _LGBMFloat32(
                 objective="multiclass", num_class=3,
                 random_state=42, verbose=-1, **p,
             )
@@ -733,7 +733,7 @@ clf_lgb_o25   = None
 lgb_cal_method = "isotonic"
 if LGB_AVAILABLE and best_lgb_p is not None:
     log.info("🔬 Selecting calibration method for LGB match...")
-    lgb_base = _LGBMFloat64(
+    lgb_base = _LGBMFloat32(
         objective="multiclass", num_class=3,
         random_state=42, verbose=-1, **best_lgb_p,
     )
@@ -741,7 +741,7 @@ if LGB_AVAILABLE and best_lgb_p is not None:
 
     log.info("⚙️  Training base LightGBM match model...")
     clf_lgb_match = CalibratedClassifierCV(
-        _LGBMFloat64(
+        _LGBMFloat32(
             objective="multiclass", num_class=3,
             random_state=42, verbose=-1, **best_lgb_p,
         ),
@@ -760,7 +760,7 @@ if LGB_AVAILABLE and best_lgb_p is not None:
     _lgb_o25_p = {k: v for k, v in best_lgb_p.items()
                   if k not in ("num_class", "objective")}
     clf_lgb_o25 = CalibratedClassifierCV(
-        _LGBMFloat64(
+        _LGBMFloat32(
             objective="binary", random_state=42, verbose=-1, **_lgb_o25_p,
         ),
         cv=5, method=lgb_cal_method,
@@ -794,7 +794,7 @@ dc_oof = np.array([
 
 if LGB_AVAILABLE and best_lgb_p is not None:
     lgb_oof = _oof_predict(
-        _LGBMFloat64(
+        _LGBMFloat32(
             objective="multiclass", num_class=3,
             random_state=42, verbose=-1, **best_lgb_p,
         ),
@@ -925,7 +925,7 @@ xgb_o25_oof = _oof_predict(
 if LGB_AVAILABLE and clf_lgb_o25 is not None:
     # LGB O2.5 OOF (uses 19-feature goals matrix)
     lgb_o25_oof = _oof_predict(
-        _LGBMFloat64(
+        _LGBMFloat32(
             objective="binary", random_state=42, verbose=-1,
             **{k: v for k, v in best_lgb_p.items() if k not in ("num_class", "objective")},
         ),

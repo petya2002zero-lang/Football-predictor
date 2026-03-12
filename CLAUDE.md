@@ -99,7 +99,7 @@ DC probs(3) + XGB probs(3) + LGB probs(3) + StandardScaler(META_RAW_COLS)(10) = 
 All models use `CalibratedClassifierCV` wrapping the base learner. Compatibility patches at the top of `train_ml.py` exist:
 - `xgboost==2.0.3` dropped `ClassifierMixin` → `__sklearn_tags__` patch for sklearn 1.8+
 - sklearn 1.4+ removed `fit_params` from `cross_val_predict` → manual 5-fold OOF loop (`_oof_predict`)
-- sklearn 1.8+ Cython calibration (`CyHalfBinomialLoss`) requires **all** inputs to be `float64` — LightGBM predict_proba wrapped in `_LGBMFloat64`; `sample_weights` array must also be `dtype=np.float64`
+- sklearn Cython calibration (`CyHalfBinomialLoss`) requires all inputs to match `X` dtype (`float32`) — LightGBM predict_proba wrapped in `_LGBMFloat32`; `sample_weights` array must also be `dtype=np.float32`
 
 ### Stage 3 — `dashboard.py` (Streamlit UI)
 Loads all 7 `.joblib` files and all `kv_store` keys at startup. Inference for each match follows:
@@ -222,7 +222,7 @@ new_derived = base_a - base_b
 - **Form string padding** — missing results use `"?"`; `form_pts()` returns `5.0` (neutral) for unknown characters.
 - **Pi ratings fallback** — `_find_pi_ratings_class()` scans penaltyblog across package versions; if unavailable or fit fails, falls back to `compute_elo_ratings()` (K=32, home_adv=60, initial=1000).
 - **Pinnacle odds** — `_extract_odds()` prefers bookie id=4 (Pinnacle), falls back to id=8 (Bet365); returns `(0.0, 0.0, 0.0)` if neither found.
-- **sklearn calibration dtype** — `sample_weights` (and any array passed to `CalibratedClassifierCV.fit`) must be `np.float64`, not `np.float32`. sklearn 1.8's Cython `CyHalfBinomialLoss.loss_gradient` raises `ValueError: Buffer dtype mismatch` otherwise.
+- **sklearn calibration dtype** — `sample_weights` (and any array passed to `CalibratedClassifierCV.fit`) must be `np.float32` to match `X` dtype. Cython `CyHalfBinomialLoss.loss_gradient` raises `ValueError: Buffer dtype mismatch` on float64/float32 mismatches.
 
 ## CI/CD
 
