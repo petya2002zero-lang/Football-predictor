@@ -14,6 +14,52 @@ from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# XGBoost / LightGBM wrappers for sklearn calibration float32 compat
+# ---------------------------------------------------------------------------
+import xgboost as xgb
+try:
+    from sklearn.utils._tags import ClassifierTags, TargetTags
+
+    def _xgb_sklearn_tags(self):
+        from sklearn.base import BaseEstimator
+        tags = BaseEstimator.__sklearn_tags__(self)
+        tags.estimator_type = "classifier"
+        tags.classifier_tags = ClassifierTags(multi_class=True)
+        tags.target_tags.required = True
+        return tags
+
+    xgb.XGBClassifier.__sklearn_tags__ = _xgb_sklearn_tags
+except Exception:
+    xgb.XGBClassifier._estimator_type = "classifier"
+
+
+class _XGBFloat32(xgb.XGBClassifier):
+    """Wraps predict_proba to return float32 — matches X dtype for sklearn calibration."""
+    def predict_proba(self, X, **kwargs):
+        return super().predict_proba(X, **kwargs).astype(np.float32)
+
+# Register in a stub "train_ml" module so joblib can deserialize models
+# without importing the real train_ml.py (which runs the full training pipeline).
+import types as _types
+import sys as _sys
+_stub = _types.ModuleType("train_ml")
+_stub._XGBFloat32 = _XGBFloat32
+_sys.modules.setdefault("train_ml", _stub)
+
+try:
+    import lightgbm as lgb
+
+    class _LGBMFloat32(lgb.LGBMClassifier):
+        """Wraps predict_proba to return float32 — matches X dtype for sklearn calibration."""
+        def predict_proba(self, X, **kwargs):
+            return super().predict_proba(X, **kwargs).astype(np.float32)
+
+    _stub._LGBMFloat32 = _LGBMFloat32
+    _LGB_AVAILABLE = True
+except ImportError:
+    _LGB_AVAILABLE = False
+
 try:
     import joblib
     _JOBLIB_AVAILABLE = True
@@ -22,13 +68,16 @@ except ImportError:
     log.warning("joblib not installed — ML models disabled. pip install joblib")
 
 # ---------------------------------------------------------------------------
-# ML ENGINE  (V3.3 Meta-Ensemble — 26 features, XGB + LGB stack)
+# ML ENGINE  (V5.0 Meta-Ensemble — 29 features, XGB + LGB + scaled meta)
 # ---------------------------------------------------------------------------
 ML_ENABLED = False
 ml_model_match   = None
 ml_model_o25     = None
 lgb_model_match  = None
+lgb_model_o25    = None
 meta_model_match = None
+meta_model_o25   = None
+meta_scaler      = None
 
 # V3.3: 26 features. Must match train_ml.py FEATURE_COLS exactly.
 FEATURE_COLS = [
@@ -62,18 +111,40 @@ FEATURE_COLS_O25 = [
     "form_diff",
 ]
 
+# V5.0: 10 raw features passed through StandardScaler into meta-learner.
+# Must match train_ml.py META_RAW_COLS exactly.
+META_RAW_COLS = [
+    "h_xg", "a_xg", "pi_diff", "form_diff", "pin_implied_h", "pin_implied_a",
+    "cs_h", "cs_a", "injury_diff", "league_avg_goals",
+]
+
 if _JOBLIB_AVAILABLE:
     try:
         ml_model_match   = joblib.load("xgb_match_model.joblib")
         ml_model_o25     = joblib.load("xgb_o25_model.joblib")
         meta_model_match = joblib.load("meta_match_model.joblib")
         ML_ENABLED = True
-        log.info("ML models loaded (V3.1 — XGB + meta).")
+        log.info("ML models loaded (V5.0 — XGB + meta).")
         try:
             lgb_model_match = joblib.load("lgb_match_model.joblib")
-            log.info("LightGBM model loaded — using 9-feature meta stack.")
+            log.info("LightGBM match model loaded.")
         except Exception:
-            log.info("lgb_match_model.joblib not found — using 6-feature XGB-only stack.")
+            log.info("lgb_match_model.joblib not found — XGB-only match stack.")
+        try:
+            meta_scaler = joblib.load("meta_scaler.joblib")
+            log.info("Meta scaler loaded.")
+        except Exception:
+            log.info("meta_scaler.joblib not found — raw meta features (unscaled).")
+        try:
+            lgb_model_o25 = joblib.load("lgb_o25_model.joblib")
+            log.info("LightGBM O2.5 model loaded.")
+        except Exception:
+            log.info("lgb_o25_model.joblib not found — XGB-only O2.5 stack.")
+        try:
+            meta_model_o25 = joblib.load("meta_o25_model.joblib")
+            log.info("Meta O2.5 model loaded.")
+        except Exception:
+            log.info("meta_o25_model.joblib not found — blended O2.5.")
     except Exception as e:
         log.warning("ML model loading failed: %s — running in math-only mode.", e)
 
@@ -824,15 +895,24 @@ def get_match_math(match_data: dict):
             o25_probs = ml_model_o25.predict_proba(features_o25)[0]
             ml_p_o25  = float(o25_probs[1]) * 100
 
-            # Build meta stack: DC(3) + XGB(3) + LGB(3) if available, else DC(3)+XGB(3)
+            # Build V5.0 meta stack: DC(3) + XGB(3) + LGB(3) + scaled_raw(10) = 19
             if lgb_model_match is not None:
                 lgb_probs = lgb_model_match.predict_proba(features)[0]
                 lgb_p_a, lgb_p_d, lgb_p_h = float(lgb_probs[0]), float(lgb_probs[1]), float(lgb_probs[2])
-                meta_features = np.array([[
-                    p_a/100.0, p_d/100.0, p_h/100.0,
-                    ml_p_a,    ml_p_d,    ml_p_h,
-                    lgb_p_a,   lgb_p_d,   lgb_p_h,
-                ]])
+                raw_meta = np.array([[
+                    h_xg, a_xg, pi_diff, form_diff, pin_h, pin_a,
+                    cs_h, cs_a, injury_diff, lg_ag,
+                ]], dtype=np.float32)
+                if meta_scaler is not None:
+                    raw_meta = meta_scaler.transform(raw_meta)
+                meta_features = np.hstack([
+                    np.array([[
+                        p_a/100.0, p_d/100.0, p_h/100.0,
+                        ml_p_a,    ml_p_d,    ml_p_h,
+                        lgb_p_a,   lgb_p_d,   lgb_p_h,
+                    ]]),
+                    raw_meta,
+                ])
             else:
                 meta_features = np.array([[
                     p_a/100.0, p_d/100.0, p_h/100.0,
@@ -843,7 +923,18 @@ def get_match_math(match_data: dict):
             p_d_raw = float(final_probs[1]) * 100
             p_h_raw = float(final_probs[2]) * 100
             p_h, p_d, p_a = normalise_1x2(p_h_raw, p_d_raw, p_a_raw)
-            p_o25 = clamp_prob(p_o25 * 0.5 + ml_p_o25 * 0.5)
+
+            # O2.5: V5.0 meta stack (DC + XGB + LGB → meta) or simple blend
+            if lgb_model_o25 is not None and meta_model_o25 is not None:
+                lgb_o25_probs = lgb_model_o25.predict_proba(features_o25)[0]
+                dc_o25 = p_o25 / 100.0
+                meta_o25_features = np.array([[
+                    dc_o25, float(o25_probs[1]), float(lgb_o25_probs[1]),
+                ]])
+                o25_meta_probs = meta_model_o25.predict_proba(meta_o25_features)[0]
+                p_o25 = clamp_prob(float(o25_meta_probs[1]) * 100)
+            else:
+                p_o25 = clamp_prob(p_o25 * 0.5 + ml_p_o25 * 0.5)
         except Exception as e:
             log.warning("ML blend failed for %s: %s — DC only.", match_key, e)
 
