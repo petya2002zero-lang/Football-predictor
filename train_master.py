@@ -259,6 +259,8 @@ def _find_pi_ratings_class():
     import importlib, pkgutil, inspect
     # 1. Known explicit paths — fastest path for common versions
     for attr_path in [
+        "ratings.PiRatingSystem",
+        "ratings.pi.PiRatingSystem",
         "ratings.PiRatings",
         "models.PiRatings",
         "PiRatings",
@@ -270,7 +272,7 @@ def _find_pi_ratings_class():
             for part in attr_path.split("."):
                 obj = getattr(obj, part)
             if inspect.isclass(obj):
-                log.info("penaltyblog: found PiRatings at pb.%s", attr_path)
+                log.info("penaltyblog: found %s at pb.%s", obj.__name__, attr_path)
                 return obj
         except AttributeError:
             continue
@@ -279,10 +281,11 @@ def _find_pi_ratings_class():
         for _, modname, _ in pkgutil.walk_packages(pb.__path__, prefix="penaltyblog."):
             try:
                 mod = importlib.import_module(modname)
-                cls = getattr(mod, "PiRatings", None)
-                if cls and inspect.isclass(cls):
-                    log.info("penaltyblog: found PiRatings via deep scan in %s", modname)
-                    return cls
+                for cls_name in ("PiRatingSystem", "PiRatings"):
+                    cls = getattr(mod, cls_name, None)
+                    if cls and inspect.isclass(cls):
+                        log.info("penaltyblog: found %s via deep scan in %s", cls_name, modname)
+                        return cls
             except Exception:
                 continue
     except Exception:

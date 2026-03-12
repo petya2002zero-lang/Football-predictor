@@ -35,6 +35,14 @@ try:
     xgb.XGBClassifier.__sklearn_tags__ = _xgb_sklearn_tags
 except Exception:
     xgb.XGBClassifier._estimator_type = "classifier"  # fallback for older sklearn
+
+
+class _XGBFloat32(xgb.XGBClassifier):
+    """Wraps predict_proba to return float32 — matches X dtype for sklearn calibration."""
+    def predict_proba(self, X, **kwargs):
+        return super().predict_proba(X, **kwargs).astype(np.float32)
+
+
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
@@ -702,7 +710,7 @@ xgb_cal_method = pick_calibration_method(xgb_base, X, y_match, cv, sample_weight
 log.info("⚙️  Training base XGBoost models...")
 
 clf_match = CalibratedClassifierCV(
-    xgb.XGBClassifier(
+    _XGBFloat32(
         objective="multi:softprob", num_class=3, eval_metric="mlogloss",
         random_state=42, **best_xgb_p,
     ),
@@ -711,7 +719,7 @@ clf_match = CalibratedClassifierCV(
 clf_match.fit(X, y_match, sample_weight=sample_weights)
 
 clf_o25 = CalibratedClassifierCV(
-    xgb.XGBClassifier(
+    _XGBFloat32(
         objective="binary:logistic", eval_metric="logloss",
         random_state=42, **best_o25_p,
     ),
