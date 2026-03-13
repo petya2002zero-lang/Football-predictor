@@ -140,6 +140,12 @@ if _JOBLIB_AVAILABLE:
             lgb_model_o25 = joblib.load("lgb_o25_model.joblib")
             log.info("LightGBM O2.5 model loaded.")
         except Exception:
+        except Exception:
+            log.info("meta_scaler.joblib not found — raw meta features (unscaled).")
+        try:
+            lgb_model_o25 = joblib.load("lgb_o25_model.joblib")
+            log.info("LightGBM O2.5 model loaded.")
+        except Exception:
             log.info("lgb_o25_model.joblib not found — XGB-only O2.5 stack.")
         try:
             meta_model_o25 = joblib.load("meta_o25_model.joblib")
