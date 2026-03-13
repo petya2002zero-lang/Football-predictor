@@ -105,6 +105,7 @@ DC probs(3) + XGB probs(3) + LGB probs(3) + StandardScaler(META_RAW_COLS)(10) = 
 | `xgb_o25_model.joblib` | XGBoost binary O2.5 (19-feature FEATURE_COLS_O25) | O2.5 ML disabled |
 | `lgb_o25_model.joblib` | LightGBM binary O2.5 | Falls back to XGB-only O2.5 |
 | `meta_o25_model.joblib` | LogReg O2.5 meta | Falls back to DC/XGB blend |
+| `meta_temperature.joblib` | Temperature T for softmax scaling | Raw meta probs used (overconfident) |
 | `feature_cols_o25.joblib` | Saved FEATURE_COLS_O25 list | backtest.py uses hardcoded fallback |
 
 All models use `CalibratedClassifierCV` wrapping the base learner. Compatibility patches at the top of `train_ml.py` exist:
@@ -113,7 +114,7 @@ All models use `CalibratedClassifierCV` wrapping the base learner. Compatibility
 - sklearn Cython calibration (`CyHalfBinomialLoss`) requires all inputs to match `X` dtype (`float32`) — XGBoost and LightGBM predict_proba wrapped in `_XGBFloat32` / `_LGBMFloat32`; `sample_weights` array must also be `dtype=np.float32`
 
 ### Stage 3 — `dashboard.py` (Streamlit UI)
-Loads all 7 `.joblib` files and all `kv_store` keys at startup. Inference for each match follows:
+Loads all 8 `.joblib` files and all `kv_store` keys at startup. Inference for each match follows:
 1. Build 29-feature vector (`FEATURE_COLS`) from `pro_preds` + `pi_ratings` + `team_forms` + `insights`; includes 3 derived defensive features computed inline from `cs_h/cs_a/fts_h/fts_a`
 2. Get XGB probs, LGB probs, Dixon-Coles probs
 3. Scale `META_RAW_COLS` via `meta_scaler`
