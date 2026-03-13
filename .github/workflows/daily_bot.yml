@@ -2,7 +2,7 @@ name: Daily Sports Data Update
 
 on:
   schedule:
-    - cron: '0 9 * * *'    # 07:00 UTC = 08:00 CET (UTC+1) / 09:00 CEST (UTC+2)
+    - cron: '0 7 * * *'    # 07:00 UTC = 08:00 CET (UTC+1) / 09:00 CEST (UTC+2)
     - cron: '0 13 * * *'   # 13:00 UTC — afternoon top-up for evening fixtures
   workflow_dispatch:
     inputs:
