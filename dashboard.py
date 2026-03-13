@@ -78,6 +78,7 @@ lgb_model_o25    = None
 meta_model_match = None
 meta_model_o25   = None
 meta_scaler      = None
+meta_temperature = 1.0
 
 # V3.3: 26 features. Must match train_ml.py FEATURE_COLS exactly.
 FEATURE_COLS = [
@@ -145,6 +146,11 @@ if _JOBLIB_AVAILABLE:
             log.info("Meta O2.5 model loaded.")
         except Exception:
             log.info("meta_o25_model.joblib not found — blended O2.5.")
+        try:
+            meta_temperature = joblib.load("meta_temperature.joblib")
+            log.info("Meta temperature loaded (T=%.2f).", meta_temperature)
+        except Exception:
+            log.info("meta_temperature.joblib not found — no temperature scaling.")
     except Exception as e:
         log.warning("ML model loading failed: %s — running in math-only mode.", e)
 
@@ -919,6 +925,12 @@ def get_match_math(match_data: dict):
                     ml_p_a,    ml_p_d,    ml_p_h,
                 ]])
             final_probs = meta_model_match.predict_proba(meta_features)[0]
+            if meta_temperature is not None and abs(meta_temperature - 1.0) > 0.01:
+                logits = np.log(np.clip(final_probs, 1e-15, 1.0))
+                scaled = logits / meta_temperature
+                scaled -= scaled.max()
+                exp_s = np.exp(scaled)
+                final_probs = exp_s / exp_s.sum()
             p_a_raw = float(final_probs[0]) * 100
             p_d_raw = float(final_probs[1]) * 100
             p_h_raw = float(final_probs[2]) * 100

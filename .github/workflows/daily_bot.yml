@@ -80,47 +80,54 @@ jobs:
         if: github.event.inputs.retrain_models == 'true'
         run: |
           git pull --rebase origin main || true
-          git add -f xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib
+          git add -f xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib meta_temperature.joblib
           git diff --cached --quiet && echo "No model changes" && exit 0
           git commit -m "🧠 Retrained models $(date -u '+%Y-%m-%d')"
           git push origin main
 
-      # Push a clean single-commit snapshot to HF — no history, no large blobs
+      - name: Export HF data
+        run: python export_hf_data.py
+
+      # Push a clean single-commit snapshot to HF — no history, LFS for large files
       - name: Sync to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          # Configure git + LFS credentials for HF
           git config --global user.name  "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
+          git lfs install
+          git config --global credential.helper store
+          echo "https://P3tya:${HF_TOKEN}@huggingface.co" > ~/.git-credentials
 
-          # Stage all current files into a temp index
+          # Create worktree with orphan branch
           WORK=$(mktemp -d)
           git worktree add "$WORK" --detach
-
           cd "$WORK"
-
-          # Start a brand-new orphan branch — zero history
           git checkout --orphan hf-deploy
           git rm -rf . --quiet
 
-          # Copy everything from the repo except legacy pkl files
+          # Copy repo contents (exclude legacy pkl files)
           rsync -a --exclude='.git' --exclude='home_goals_model.pkl' \
                 --exclude='away_goals_model.pkl' \
                 "$GITHUB_WORKSPACE/" .
 
-          # Write a .gitattributes so HF treats large files as LFS
+          # Set up LFS tracking for large files
           cat > .gitattributes << 'ATTRS'
           *.sqlite filter=lfs diff=lfs merge=lfs -text
           *.joblib filter=lfs diff=lfs merge=lfs -text
           *.pkl    filter=lfs diff=lfs merge=lfs -text
           ATTRS
 
-          git lfs install
+          # Stage and commit
           git add .
           git commit -m "🚀 Deploy $(date -u '+%Y-%m-%d %H:%M UTC')"
 
-          git remote add hf https://P3tya:$HF_TOKEN@huggingface.co/spaces/P3tya/FootballPredictor
+          # Push to HF with LFS
+          git remote add hf https://P3tya:${HF_TOKEN}@huggingface.co/spaces/P3tya/FootballPredictor
           git push hf hf-deploy:main --force
 
+          # Cleanup
           cd "$GITHUB_WORKSPACE"
           git worktree remove "$WORK" --force
+          rm -f ~/.git-credentials

@@ -44,6 +44,7 @@ MODEL_FILES  = {
     "xgb_o25":    "xgb_o25_model.joblib",
     "lgb_o25":    "lgb_o25_model.joblib",
     "meta_o25":   "meta_o25_model.joblib",
+    "meta_temp":  "meta_temperature.joblib",
 }
 TIER_THRESHOLDS = {"emerald": 85.0, "diamond+": 75.0, "diamond": 65.0, "gold": 0.0}
 DEFAULT_RHO = -0.130
@@ -338,6 +339,12 @@ def predict(feat: dict, league: str = "") -> dict:
                 meta_in = np.hstack((meta_in, scaled))
 
             final = models["meta_match"].predict_proba(meta_in)[0]
+            _mt = models.get("meta_temp", 1.0)
+            if _mt is not None and abs(_mt - 1.0) > 0.01:
+                _lg = np.log(np.clip(final, 1e-15, 1.0)) / _mt
+                _lg -= _lg.max()
+                _ex = np.exp(_lg)
+                final = _ex / _ex.sum()
             p_a_r, p_d_r, p_h_r = float(final[0]) * 100, float(final[1]) * 100, float(final[2]) * 100
             s = p_h_r + p_d_r + p_a_r
             p_h, p_d, p_a = (p_h_r / s * 100, p_d_r / s * 100, p_a_r / s * 100)
