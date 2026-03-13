@@ -234,7 +234,7 @@ new_derived = base_a - base_b
 
 `.github/workflows/daily_bot.yml` runs twice daily (07:00 and 13:00 UTC):
 - Always runs `train_master.py` and force-commits `database.sqlite` (gitignored locally, `git add -f` in CI)
-- Runs `train_ml.py` and force-commits 7 `.joblib` files only when triggered with `retrain_models=true` via `workflow_dispatch` (`feature_cols_o25.joblib` is not committed — `backtest.py` uses a hardcoded fallback)
+- Runs `train_ml.py` and force-commits 8 `.joblib` files only when triggered with `retrain_models=true` via `workflow_dispatch` (`feature_cols_o25.joblib` is not committed — `backtest.py` uses a hardcoded fallback)
 - Syncs to Hugging Face Spaces: creates an orphan branch (`hf-deploy`) with zero history, writes `.gitattributes` for LFS (`*.sqlite`, `*.joblib`, `*.pkl`), and force-pushes to `huggingface.co/spaces/P3tya/FootballPredictor` (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
 
 Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
