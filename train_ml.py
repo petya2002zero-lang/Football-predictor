@@ -882,6 +882,9 @@ else:
     meta_oof = meta_oof_raw
     log.info("Temperature ~1.0 — no scaling needed.")
 
+joblib.dump(best_temperature, "meta_temperature.joblib")
+log.info("Saved meta_temperature.joblib (T=%.2f)", best_temperature)
+
 
 # ---------------------------------------------------------------------------
 # V4.0: EVALUATION — real-data only (not polluted by synthetic)

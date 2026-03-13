@@ -20,6 +20,12 @@ python train_ml.py
 
 # 4. Run the dashboard
 streamlit run dashboard.py
+
+# 5. Offline ROI analysis (uses current model state — look-ahead bias applies beyond ~4-6 weeks)
+python backtest.py [--min-tier {emerald,diamond+,diamond,gold}] [--days N] [--no-color]
+
+# 6. Inspect data completeness without API calls
+python data_quality_check.py
 ```
 
 No test suite exists. Validate changes by running `python -m py_compile <file>.py` before executing.
@@ -32,7 +38,7 @@ No test suite exists. Validate changes by running `python -m py_compile <file>.p
 
 - **`check_db.py`** — Runs SQLite `PRAGMA integrity_check`; deletes `database.sqlite` if corrupted so the next `train_master.py` run rebuilds it cleanly.
 - **`export_hf_data.py`** — Reads the entire `kv_store` table, excludes `bet_log`, and writes `hf_data.json` for Hugging Face Spaces sync (SQLite exceeds HF's 10 MB limit).
-- **`backtest.py`** — Offline ROI analysis against `recent` results. Loads all models and kv_store keys, reconstructs feature vectors, runs the full prediction stack, and prints ROI tables by tier and pick type. CLI: `python backtest.py [--min-tier diamond] [--days 30]`. Uses current ratings as a proxy for historical values — look-ahead bias applies to older records.
+- **`backtest.py`** — Offline ROI analysis against `recent` results. Loads all models and kv_store keys, reconstructs feature vectors, runs the full prediction stack, and prints ROI tables by tier and pick type. CLI: `python backtest.py [--min-tier {emerald,diamond+,diamond,gold}] [--days N] [--no-color]`. Uses current ratings as a proxy for historical values — look-ahead bias applies to older records; most reliable for last 4–6 weeks.
 - **`data_quality_check.py`** — Inspects data completeness without importing `train_master.py`. Reports: (1) pro-preds feature coverage for upcoming matches (% fully-populated vs partial), (2) upcoming matches missing Pinnacle odds (`pin_implied_h=0.0`), (3) `hist_odds_cache` coverage for recent results plus an estimate of runs needed for full coverage. CLI: `python data_quality_check.py`.
 
 ## Architecture
@@ -65,7 +71,7 @@ The pipeline runs in numbered sections:
 6. Pro predictions — compiles full feature dict per upcoming match into `pro_preds`
 
 ### Stage 2 — `train_ml.py` (ML Pipeline — V5.0)
-Reads from `database.sqlite`, builds a 3-layer ensemble, saves 7 `.joblib` files.
+Reads from `database.sqlite`, builds a 3-layer ensemble, saves 8 `.joblib` files.
 
 **Feature contract:** `FEATURE_COLS` (29 features), `META_RAW_COLS` (10 features), and `FEATURE_COLS_O25` (19 features) are defined at the top of both `train_ml.py` and `dashboard.py` and **must match exactly**. Changing any list requires updating both files simultaneously.
 
@@ -77,6 +83,11 @@ Reads from `database.sqlite`, builds a 3-layer ensemble, saves 7 `.joblib` files
 `FEATURE_COLS_O25` is a separate 19-feature set used only by the O2.5 models — it drops table-position and 1X2-distribution features irrelevant to total goals. The O2.5 models train on `X_o25 = df[FEATURE_COLS_O25]`, not `X`.
 
 **Training data assembly:** Each record in `recent` is matched to `pro_preds` by `"{home} vs {away}"` key for team-specific features. Pinnacle odds come from `hist_odds_cache[str(fixture_id)]`. Market edge is computed in `train_ml.py` using `get_dc_probs()`.
+
+**Training constants:**
+- `HALF_LIFE_DAYS = 60.0` — sample weight decay (doubled from V4's 30)
+- `SYNTHETIC_CAP = 1500`, `SYNTHETIC_WEIGHT = 0.3` — bootstrap synthetic records if real data is sparse
+- Optuna trials: 75 (XGB/LGB match), 50 (O2.5 models), 30 (meta-learner C); only runs when `n_real >= 150` (match) or `>= 100` (meta)
 
 **Model stack (19-feature meta):**
 ```
@@ -107,23 +118,15 @@ Loads all 7 `.joblib` files and all `kv_store` keys at startup. Inference for ea
 2. Get XGB probs, LGB probs, Dixon-Coles probs
 3. Scale `META_RAW_COLS` via `meta_scaler`
 4. Concatenate → 19-feature vector → `meta_match_model` → temperature scaling → final probs
-5. O2.5: separate 19-feature `features_o25` (`FEATURE_COLS_O25`) → `xgb_o25_model` → blended with DC O2.5
+5. O2.5: separate 19-feature `features_o25` (`FEATURE_COLS_O25`) → XGB + LGB + DC → `meta_o25_model` → final O2.5 prob
 
 **`get_match_math(m)` caching:** `_cached_match_math(m)` wraps `get_match_math` with a `st.session_state` dict invalidated by `id(data["upcoming"])`. All loop call sites use `_cached_match_math` — never call `get_match_math` in a loop directly.
 
-**Display constants:** `DEFAULT_LEAGUES` (18 leagues) auto-selected in sidebar. Tier thresholds in `render_match_card()`: Emerald ≥85% (≥90% if no true xG), Diamond+ ≥75%, Diamond ≥65%, Gold <65%. Timezone hardcoded to `Europe/Budapest` in `format_time()`.
+**Display constants:** `DEFAULT_LEAGUES` (18 leagues) auto-selected in sidebar. Cup competitions (FA Cup, Copa del Rey, DFB Pokal, Coppa Italia, Coupe de France, Carabao Cup, KNVB Beker) are excluded from the default view via `CUP_NAMES`. Tier thresholds in `render_match_card()`: Emerald ≥85% (≥90% if no true xG), Diamond+ ≥75%, Diamond ≥65%, Gold <65%. Timezone hardcoded to `Europe/Budapest` in `format_time()`.
 
 ## Critical Constraints
 
-- **FEATURE_COLS, FEATURE_COLS_O25, and META_RAW_COLS must be identical** in `train_ml.py` and `dashboard.py`. Verify with:
-  ```bash
-  python -c "
-  from dashboard import FEATURE_COLS, FEATURE_COLS_O25
-  from train_ml import FEATURE_COLS as F2, FEATURE_COLS_O25 as O2
-  assert F2==FEATURE_COLS, f'FEATURE_COLS mismatch: {set(F2)^set(FEATURE_COLS)}'
-  assert O2==FEATURE_COLS_O25, f'FEATURE_COLS_O25 mismatch: {set(O2)^set(FEATURE_COLS_O25)}'
-  "
-  ```
+- **FEATURE_COLS, FEATURE_COLS_O25, and META_RAW_COLS must be identical** in `train_ml.py`, `dashboard.py`, and `backtest.py`. Do NOT verify by importing `train_ml` — it has no `__main__` guard and runs the full training pipeline on import. Instead, compare the lists manually or use `grep`.
 - **Model class order is Away=0, Draw=1, Home=2** — `probs[2]` is home win, not `probs[0]`.
 - **Never modify `database.sqlite` schema** — the kv_store is append/replace only. Never drop tables.
 - **Never overwrite a model file** — always retrain from scratch with `train_ml.py`; it overwrites atomically via `joblib.dump`.
@@ -220,16 +223,18 @@ new_derived = base_a - base_b
 - **`team_forms` keys are bare team IDs** (integers) for some lookups and bare team name strings for others — check which the calling code expects.
 - **League name matching uses API strings** (e.g., `"Premier League"`, not abbreviations) for xG blending and league averages lookup.
 - **Form string padding** — missing results use `"?"`; `form_pts()` returns `5.0` (neutral) for unknown characters.
-- **Pi ratings fallback** — `_find_pi_ratings_class()` scans penaltyblog for `PiRatingSystem` (v1.9.0+) or `PiRatings` (older versions); if unavailable or fit fails, falls back to `compute_elo_ratings()` (K=32, home_adv=60, initial=1000).
+- **Pi ratings fallback** — `_find_pi_ratings_class()` uses `importlib.import_module("penaltyblog.ratings")` (most reliable) then falls back to `getattr` traversal and a deep `pkgutil` scan. `_try_fit_pi_ratings()` detects v1.9.0's API (no `fit()`, uses `update_ratings(home_team, away_team, observed_goal_difference)` per match + `get_team_rating()` for extraction) vs older batch `fit()` APIs. If all attempts fail, falls back to `compute_elo_ratings()` (K=32, home_adv=60, initial=1000).
 - **Pinnacle odds** — `_extract_odds()` prefers bookie id=4 (Pinnacle), falls back to id=8 (Bet365); returns `(0.0, 0.0, 0.0)` if neither found.
 - **sklearn calibration dtype** — `sample_weights` (and any array passed to `CalibratedClassifierCV.fit`) must be `np.float32` to match `X` dtype. Cython `CyHalfBinomialLoss.loss_gradient` raises `ValueError: Buffer dtype mismatch` on float64/float32 mismatches. Both XGBoost and LightGBM are wrapped (`_XGBFloat32`, `_LGBMFloat32`) to force float32 `predict_proba` output inside `CalibratedClassifierCV`.
+- **Model deserialization requires wrapper stubs** — `.joblib` files reference `train_ml._XGBFloat32` and `train_ml._LGBMFloat32` (the module name pickled when `train_ml.py` ran). Any file that calls `joblib.load()` on these models must register a stub `train_ml` module in `sys.modules` with these classes **before** loading, or Python will `import train_ml` (which has no `__main__` guard and runs the full training pipeline). See `dashboard.py` lines ~42-48 for the pattern. `backtest.py` also needs this if it loads models.
+- **Never `import train_ml`** at module level — `train_ml.py` has no `if __name__ == "__main__"` guard. Importing it runs the full Optuna + training pipeline. Use the stub pattern above or read constants manually.
 
 ## CI/CD
 
 `.github/workflows/daily_bot.yml` runs twice daily (07:00 and 13:00 UTC):
 - Always runs `train_master.py` and force-commits `database.sqlite` (gitignored locally, `git add -f` in CI)
-- Runs `train_ml.py` and force-commits all 7 `.joblib` files only when triggered with `retrain_models=true`
-- Syncs to Hugging Face Spaces via force-push to `hf-deploy` branch (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
+- Runs `train_ml.py` and force-commits 7 `.joblib` files only when triggered with `retrain_models=true` via `workflow_dispatch` (`feature_cols_o25.joblib` is not committed — `backtest.py` uses a hardcoded fallback)
+- Syncs to Hugging Face Spaces: creates an orphan branch (`hf-deploy`) with zero history, writes `.gitattributes` for LFS (`*.sqlite`, `*.joblib`, `*.pkl`), and force-pushes to `huggingface.co/spaces/P3tya/FootballPredictor` (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
 
 Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
 
