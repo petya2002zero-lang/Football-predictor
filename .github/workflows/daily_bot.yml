@@ -119,8 +119,9 @@ jobs:
           *.pkl    filter=lfs diff=lfs merge=lfs -text
           ATTRS
 
-          # Stage and commit
+          # Stage and commit (force-add gitignored files needed by HF)
           git add .
+          git add -f hf_data.json *.joblib || true
           git commit -m "🚀 Deploy $(date -u '+%Y-%m-%d %H:%M UTC')"
 
           # Push to HF with LFS
