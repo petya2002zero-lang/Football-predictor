@@ -931,6 +931,8 @@ def get_match_math(match_data: dict):
                 scaled -= scaled.max()
                 exp_s = np.exp(scaled)
                 final_probs = exp_s / exp_s.sum()
+            final_probs = np.clip(final_probs, 0.03, 0.97)
+            final_probs /= final_probs.sum()
             p_a_raw = float(final_probs[0]) * 100
             p_d_raw = float(final_probs[1]) * 100
             p_h_raw = float(final_probs[2]) * 100

@@ -302,7 +302,7 @@ def find_best_temperature(logits, y_true, temps=None):
     Returns best_T. Applied as: probs = softmax(logits / T).
     """
     if temps is None:
-        temps = np.arange(0.5, 3.01, 0.05)
+        temps = np.arange(0.7, 3.01, 0.05)
     best_t, best_ll = 1.0, float("inf")
     for t in temps:
         scaled = logits / t
@@ -784,9 +784,12 @@ if LGB_AVAILABLE and best_lgb_p is not None:
 log.info("🧠 Generating out-of-fold probabilities...")
 
 xgb_oof = _oof_predict(
-    xgb.XGBClassifier(
-        objective="multi:softprob", num_class=3, eval_metric="mlogloss",
-        random_state=42, **best_xgb_p,
+    CalibratedClassifierCV(
+        _XGBFloat32(
+            objective="multi:softprob", num_class=3, eval_metric="mlogloss",
+            random_state=42, **best_xgb_p,
+        ),
+        cv=5, method=xgb_cal_method,
     ),
     X, y_match, cv=cv, sample_weight=sample_weights,
 )
@@ -802,9 +805,12 @@ dc_oof = np.array([
 
 if LGB_AVAILABLE and best_lgb_p is not None:
     lgb_oof = _oof_predict(
-        _LGBMFloat32(
-            objective="multiclass", num_class=3,
-            random_state=42, verbose=-1, **best_lgb_p,
+        CalibratedClassifierCV(
+            _LGBMFloat32(
+                objective="multiclass", num_class=3,
+                random_state=42, verbose=-1, **best_lgb_p,
+            ),
+            cv=5, method=lgb_cal_method,
         ),
         X, y_match, cv=cv, sample_weight=sample_weights,
     )
@@ -926,9 +932,12 @@ dc_o25_oof = np.array([
 
 # XGB O2.5 OOF (uses 19-feature goals matrix)
 xgb_o25_oof = _oof_predict(
-    xgb.XGBClassifier(
-        objective="binary:logistic", eval_metric="logloss",
-        random_state=42, **best_o25_p,
+    CalibratedClassifierCV(
+        _XGBFloat32(
+            objective="binary:logistic", eval_metric="logloss",
+            random_state=42, **best_o25_p,
+        ),
+        cv=5, method=xgb_cal_method,
     ),
     X_o25, y_o25, cv=cv, sample_weight=sample_weights,
 )[:, 1].reshape(-1, 1)
@@ -936,9 +945,12 @@ xgb_o25_oof = _oof_predict(
 if LGB_AVAILABLE and clf_lgb_o25 is not None:
     # LGB O2.5 OOF (uses 19-feature goals matrix)
     lgb_o25_oof = _oof_predict(
-        _LGBMFloat32(
-            objective="binary", random_state=42, verbose=-1,
-            **{k: v for k, v in best_lgb_p.items() if k not in ("num_class", "objective")},
+        CalibratedClassifierCV(
+            _LGBMFloat32(
+                objective="binary", random_state=42, verbose=-1,
+                **{k: v for k, v in best_lgb_p.items() if k not in ("num_class", "objective")},
+            ),
+            cv=5, method=lgb_cal_method,
         ),
         X_o25, y_o25, cv=cv, sample_weight=sample_weights,
     )[:, 1].reshape(-1, 1)
