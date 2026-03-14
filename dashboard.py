@@ -909,8 +909,10 @@ def get_match_math(match_data: dict):
                     h_xg, a_xg, pi_diff, form_diff, pin_h, pin_a,
                     cs_h, cs_a, injury_diff, lg_ag,
                 ]], dtype=np.float32)
+                raw_meta = np.clip(raw_meta, -10.0, 10.0)   # guard against scale drift
                 if meta_scaler is not None:
                     raw_meta = meta_scaler.transform(raw_meta)
+                    raw_meta = np.clip(raw_meta, -5.0, 5.0)  # bound scaled output
                 meta_features = np.hstack([
                     np.array([[
                         p_a/100.0, p_d/100.0, p_h/100.0,

@@ -446,6 +446,19 @@ if not _elo_computed and recent_results:
         pi_ratings[team] = round((rating - mean_elo) / 400.0, 4)
     log.info("✅ Elo ratings computed for %d teams.", len(elo))
 
+# Normalise base team ratings to z-scores so pi_diff is scale-invariant
+# regardless of whether penaltyblog or Elo backend was used.
+_SUFFIX = ("_safety", "_title", "_xpts_delta")
+_base_vals = [v for k, v in pi_ratings.items() if not k.endswith(_SUFFIX)]
+if len(_base_vals) >= 2:
+    _mu = sum(_base_vals) / len(_base_vals)
+    _var = sum((v - _mu) ** 2 for v in _base_vals) / len(_base_vals)
+    _sigma = max(0.001, _var ** 0.5)
+    for k in list(pi_ratings.keys()):
+        if not k.endswith(_SUFFIX):
+            pi_ratings[k] = round((pi_ratings[k] - _mu) / _sigma, 4)
+    log.info("Pi ratings normalised: μ=%.4f → 0, σ=%.4f → 1 (%d teams).", _mu, _sigma, len(_base_vals))
+
 
 # ---------------------------------------------------------------------------
 # 2. UPCOMING FIXTURES (next 10 days)
@@ -1097,8 +1110,8 @@ for match in upcoming_matches[:150]:
         pi_adj_a = max(-1.5, min(1.5, (h_pi - a_pi) / 2.0))
         a_xg = max(0.2, l_avg["a_avg"] - pi_adj_a)
 
-    # Pi rating differential still applied as tiebreaker
-    pi_boost = (h_pi - a_pi) * 0.15
+    # Pi rating differential still applied as tiebreaker (capped to ±0.5 goals)
+    pi_boost = max(-0.5, min(0.5, (h_pi - a_pi) * 0.15))
     h_xg = max(0.2, h_xg + pi_boost)
     a_xg = max(0.2, a_xg - pi_boost)
 
