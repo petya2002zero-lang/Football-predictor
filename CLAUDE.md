@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+This is a Football AI/Analytics project (FootballAI) using Python, with ML models (XGBoost, LightGBM, sklearn), a Streamlit/Gradio dashboard deployed on Hugging Face Spaces, and CI/CD via GitHub Actions. API source is API-Football v3 via RapidAPI (NOT football-data.org).
+
 ## Commands
 
 ```bash
@@ -54,7 +58,7 @@ Fetches from API-Football v3 and writes everything to `database.sqlite` via `sav
 | `upcoming` | Next ~10 days of fixtures — inference targets |
 | `pro_preds` | Pre-computed features for upcoming 150 matches |
 | `hist_odds_cache` | Historical Pinnacle odds keyed by `fixture_id` (fills 120/run) |
-| `pi_ratings` | Elo/Pi ratings per team + `{team}_safety`, `{team}_title`, `{team}_xpts_delta` |
+| `pi_ratings` | Elo/Pi ratings per team + `{team}_safety`, `{team}_title`, `{team}_xpts_delta`. Base team ratings are **z-score normalized** (mean=0, std=1) at the end of Section 2 so `pi_diff` is always on a consistent scale regardless of backend. |
 | `league_averages` | Per-league goal averages and H/D/A rates |
 | `insights` | Per-fixture injury, odds, sharp-action data |
 | `standings`, `team_forms`, `h2h` | Supporting lookup data |
@@ -73,7 +77,7 @@ The pipeline runs in numbered sections:
 ### Stage 2 — `train_ml.py` (ML Pipeline — V5.0)
 Reads from `database.sqlite`, builds a 3-layer ensemble, saves 8 `.joblib` files.
 
-**Feature contract:** `FEATURE_COLS` (29 features), `META_RAW_COLS` (10 features), and `FEATURE_COLS_O25` (19 features) are defined at the top of both `train_ml.py` and `dashboard.py` and **must match exactly**. Changing any list requires updating both files simultaneously.
+**Feature contract:** `FEATURE_COLS` (29 features), `META_RAW_COLS` (10 features), and `FEATURE_COLS_O25` (19 features) are defined at the top of both `train_ml.py` and `dashboard.py` and **must match exactly**. Changing any list requires updating both files simultaneously. Note: the inline comment `N_FEAT = len(FEATURE_COLS)  # 26` in `train_ml.py` is stale — the actual length is 29.
 
 `FEATURE_COLS` includes 3 derived defensive features computed from existing `pro_preds` values — **no `train_master.py` change needed** for derived features:
 - `cs_diff` = `cs_h - cs_a` (net home defensive edge)
@@ -108,7 +112,7 @@ DC probs(3) + XGB probs(3) + LGB probs(3) + StandardScaler(META_RAW_COLS)(10) = 
 | `meta_temperature.joblib` | Temperature T for softmax scaling | Raw meta probs used (overconfident) |
 | `feature_cols_o25.joblib` | Saved FEATURE_COLS_O25 list | backtest.py uses hardcoded fallback |
 
-All models use `CalibratedClassifierCV` wrapping the base learner. Compatibility patches at the top of `train_ml.py` exist:
+All models use `CalibratedClassifierCV` wrapping the base learner. **OOF predictions for the meta-stack must also use `CalibratedClassifierCV`** (not raw estimators) so training and inference distributions match — all 4 OOF calls (`xgb_oof`, `lgb_oof`, `xgb_o25_oof`, `lgb_o25_oof`) wrap their estimator in `CalibratedClassifierCV(estimator, cv=5, method=...)`. Removing this wrapper causes train-inference mismatch and extreme meta probabilities. Compatibility patches at the top of `train_ml.py` exist:
 - `xgboost==2.0.3` dropped `ClassifierMixin` → `__sklearn_tags__` patch for sklearn 1.8+
 - sklearn 1.4+ removed `fit_params` from `cross_val_predict` → manual 5-fold OOF loop (`_oof_predict`)
 - sklearn Cython calibration (`CyHalfBinomialLoss`) requires all inputs to match `X` dtype (`float32`) — XGBoost and LightGBM predict_proba wrapped in `_XGBFloat32` / `_LGBMFloat32`; `sample_weights` array must also be `dtype=np.float32`
@@ -117,13 +121,15 @@ All models use `CalibratedClassifierCV` wrapping the base learner. Compatibility
 Loads all 8 `.joblib` files and all `kv_store` keys at startup. Inference for each match follows:
 1. Build 29-feature vector (`FEATURE_COLS`) from `pro_preds` + `pi_ratings` + `team_forms` + `insights`; includes 3 derived defensive features computed inline from `cs_h/cs_a/fts_h/fts_a`
 2. Get XGB probs, LGB probs, Dixon-Coles probs
-3. Scale `META_RAW_COLS` via `meta_scaler`
-4. Concatenate → 19-feature vector → `meta_match_model` → temperature scaling → final probs
+3. Scale `META_RAW_COLS` via `meta_scaler` — raw features are clipped to `[-10, 10]` before transform and scaled output clipped to `[-5, 5]` to guard against future feature-scale drift
+4. Concatenate → 19-feature vector → `meta_match_model` → temperature scaling → final probs clipped to `[0.03, 0.97]` and renormalized
 5. O2.5: separate 19-feature `features_o25` (`FEATURE_COLS_O25`) → XGB + LGB + DC → `meta_o25_model` → final O2.5 prob
 
 **`get_match_math(m)` caching:** `_cached_match_math(m)` wraps `get_match_math` with a `st.session_state` dict invalidated by `id(data["upcoming"])`. All loop call sites use `_cached_match_math` — never call `get_match_math` in a loop directly.
 
 **Display constants:** `DEFAULT_LEAGUES` (18 leagues) auto-selected in sidebar. Cup competitions (FA Cup, Copa del Rey, DFB Pokal, Coppa Italia, Coupe de France, Carabao Cup, KNVB Beker) are excluded from the default view via `CUP_NAMES`. Tier thresholds in `render_match_card()`: Emerald ≥85% (≥90% if no true xG), Diamond+ ≥75%, Diamond ≥65%, Gold <65%. Timezone hardcoded to `Europe/Budapest` in `format_time()`.
+
+**`get_best_pick(stats, m, core_only=False)`** — selects the highest-confidence market pick. When `core_only=False` (default, used by League Predictions and Parlay Builder), it can fall back to Asian Handicap (+1.5/-1.5) picks if they beat core-market confidence. The **Emerald/Diamond Results page passes `core_only=True`** to suppress AH picks entirely, ensuring the Prediction column always shows a goals/1X2 market and that Emerald tier is reachable from raw core-market probabilities.
 
 ## Critical Constraints
 
@@ -181,6 +187,9 @@ _model_h, _model_d, _model_a = _dc_home_prob(h_xg, a_xg, _rho)
 
 # Final floor consistent with initial floor
 h_xg = max(0.20, h_xg); a_xg = max(0.20, a_xg)
+
+# pi_boost capped to ±0.5 goals (applied after geometric blend)
+pi_boost = max(-0.5, min(0.5, (h_pi - a_pi) * 0.15))
 ```
 
 ## Adding a New ML Feature
@@ -224,7 +233,7 @@ new_derived = base_a - base_b
 - **`team_forms` keys are bare team IDs** (integers) for some lookups and bare team name strings for others — check which the calling code expects.
 - **League name matching uses API strings** (e.g., `"Premier League"`, not abbreviations) for xG blending and league averages lookup.
 - **Form string padding** — missing results use `"?"`; `form_pts()` returns `5.0` (neutral) for unknown characters.
-- **Pi ratings fallback** — `_find_pi_ratings_class()` uses `importlib.import_module("penaltyblog.ratings")` (most reliable) then falls back to `getattr` traversal and a deep `pkgutil` scan. `_try_fit_pi_ratings()` detects v1.9.0's API (no `fit()`, uses `update_ratings(home_team, away_team, observed_goal_difference)` per match + `get_team_rating()` for extraction) vs older batch `fit()` APIs. If all attempts fail, falls back to `compute_elo_ratings()` (K=32, home_adv=60, initial=1000).
+- **Pi ratings fallback** — `_find_pi_ratings_class()` uses `importlib.import_module("penaltyblog.ratings")` (most reliable) then falls back to `getattr` traversal and a deep `pkgutil` scan. `_try_fit_pi_ratings()` detects v1.9.0's API (no `fit()`, uses `update_ratings(home_team, away_team, observed_goal_difference)` per match + `get_team_rating()` for extraction) vs older batch `fit()` APIs. If all attempts fail, falls back to `compute_elo_ratings()` (K=32, home_adv=60, initial=1000). **After either path**, all base team ratings are z-score normalized (mean=0, std=1) so `pi_diff` is always in roughly `[-4, +4]` regardless of backend. Never skip this normalization step — the meta_scaler depends on it; without it, the LogReg meta-learner receives extreme z-scores and outputs near-deterministic probabilities.
 - **Pinnacle odds** — `_extract_odds()` prefers bookie id=4 (Pinnacle), falls back to id=8 (Bet365); returns `(0.0, 0.0, 0.0)` if neither found.
 - **sklearn calibration dtype** — `sample_weights` (and any array passed to `CalibratedClassifierCV.fit`) must be `np.float32` to match `X` dtype. Cython `CyHalfBinomialLoss.loss_gradient` raises `ValueError: Buffer dtype mismatch` on float64/float32 mismatches. Both XGBoost and LightGBM are wrapped (`_XGBFloat32`, `_LGBMFloat32`) to force float32 `predict_proba` output inside `CalibratedClassifierCV`.
 - **Model deserialization requires wrapper stubs** — `.joblib` files reference `train_ml._XGBFloat32` and `train_ml._LGBMFloat32` (the module name pickled when `train_ml.py` ran). Any file that calls `joblib.load()` on these models must register a stub `train_ml` module in `sys.modules` with these classes **before** loading, or Python will `import train_ml` (which has no `__main__` guard and runs the full training pipeline). See `dashboard.py` lines ~42-48 for the pattern. `backtest.py` also needs this if it loads models.
@@ -238,6 +247,21 @@ new_derived = base_a - base_b
 - Syncs to Hugging Face Spaces: creates an orphan branch (`hf-deploy`) with zero history, writes `.gitattributes` for LFS (`*.sqlite`, `*.joblib`, `*.pkl`), and force-pushes to `huggingface.co/spaces/P3tya/FootballPredictor` (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
 
 Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
+
+## Git Workflow
+
+- Always `git pull` before pushing to avoid merge conflicts with remote.
+- Never create PRs when there's no common branch history — force-push to main if needed.
+- Working directory must be inside the git repo; do not run scripts from outside the repo directory.
+
+## Deployment
+
+- Hugging Face Spaces deployment: always check that sklearn, XGBoost, and LightGBM versions in requirements.txt match the versions used during model training (especially sklearn upper bounds).
+- When fixing dtype errors, wrap LGBMClassifier to ensure float64 compatibility with sklearn calibration.
+
+## Debugging Approach
+
+- Before investigating a bug, first check if the fix already exists on remote main (`git log origin/main`). Do not spend time diagnosing issues that are already resolved upstream.
 
 ## Testing Checklist Before Pushing
 

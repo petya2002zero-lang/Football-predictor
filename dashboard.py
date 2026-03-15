@@ -1353,7 +1353,7 @@ def render_match_card(m: dict, pre_calc=None):
 # SHARED: best-pick helper (DRY — used in multiple pages)
 # ---------------------------------------------------------------------------
 
-def get_best_pick(stats, m: dict):
+def get_best_pick(stats, m: dict, core_only: bool = False):
     p_h, p_d, p_a, h_xg, a_xg, p_o25, p_btts, p_u35, score, det = stats
     pp = data["pro_preds"].get(f"{m['home']} vs {m['away']}", {})
     emerald_thresh = 85.0 if (pp.get("h_true_xg") or pp.get("a_true_xg")) else 90.0
@@ -1365,17 +1365,18 @@ def get_best_pick(stats, m: dict):
     }
     best_pick = max(core, key=core.get); top_p = core[best_pick]
 
-    safe = {
-        f"{m['home']} +1.5": det.get("h_plus_1_5", 0),
-        f"{m['away']} +1.5": det.get("a_plus_1_5", 0),
-        f"{m['home']} -1.5": det.get("h_minus_1_5", 0),
-        f"{m['away']} -1.5": det.get("a_minus_1_5", 0),
-    }
-    best_safe = max(safe, key=safe.get); safe_p = safe[best_safe]
+    if not core_only:
+        safe = {
+            f"{m['home']} +1.5": det.get("h_plus_1_5", 0),
+            f"{m['away']} +1.5": det.get("a_plus_1_5", 0),
+            f"{m['home']} -1.5": det.get("h_minus_1_5", 0),
+            f"{m['away']} -1.5": det.get("a_minus_1_5", 0),
+        }
+        best_safe = max(safe, key=safe.get); safe_p = safe[best_safe]
 
-    if safe_p > top_p and top_p < emerald_thresh:
-        if safe_p >= emerald_thresh: top_p, best_pick = emerald_thresh - 0.1, best_safe
-        elif safe_p >= 65.0:         top_p, best_pick = safe_p, best_safe
+        if safe_p > top_p and top_p < emerald_thresh:
+            if safe_p >= emerald_thresh: top_p, best_pick = emerald_thresh - 0.1, best_safe
+            elif safe_p >= 65.0:         top_p, best_pick = safe_p, best_safe
 
     return best_pick, top_p, emerald_thresh
 
@@ -1436,13 +1437,14 @@ elif page == "🟢 Emerald/Diamond Results":
     if data["recent"]:
         recent_sorted = sorted(data["recent"], key=lambda x: x["date"], reverse=True)
         dates = sorted({m["date"][:10] for m in recent_sorted}, reverse=True)
+        all_hits = []
         for d in dates:
             day_matches  = [m for m in recent_sorted if m["date"].startswith(d)]
             diamond_hits = []
             for m in day_matches:
                 try:
                     stats = _cached_match_math(m)
-                    ai_pick, top_p, emerald_thresh = get_best_pick(stats, m)
+                    ai_pick, top_p, emerald_thresh = get_best_pick(stats, m, core_only=True)
                     if top_p < 65.0: continue
                     score_str = m.get("score", "")
                     if "-" not in str(score_str): continue
@@ -1456,16 +1458,11 @@ elif page == "🟢 Emerald/Diamond Results":
                     elif ai_pick == "Under 3.5" and total_g < 4:        won = True
                     elif ai_pick == "Over 1.5" and total_g > 1:         won = True
                     elif ai_pick == "Under 4.5" and total_g < 5:        won = True
-                    elif "-1.5" in ai_pick:
-                        if m["home"] in ai_pick and (h_g - a_g) >= 2:  won = True
-                        elif m["away"] in ai_pick and (a_g - h_g) >= 2: won = True
-                    elif "+1.5" in ai_pick:
-                        if m["home"] in ai_pick and (h_g - a_g) >= -1: won = True
-                        elif m["away"] in ai_pick and (a_g - h_g) >= -1: won = True
                     tier = (
-                        "🟢 EMERALD" if top_p >= emerald_thresh
+                        "🟢 EMERALD"  if top_p >= emerald_thresh
                         else "💎 DIAMOND+" if top_p >= 75
-                        else "💎 DIAMOND"
+                        else "💎 DIAMOND"  if top_p >= 65
+                        else "🥇 GOLD"
                     )
                     diamond_hits.append({
                         "Match": f"{m['home']} vs {m['away']}", "Score": score_str,
@@ -1478,6 +1475,11 @@ elif page == "🟢 Emerald/Diamond Results":
                 st.markdown(f"### 📅 {d}")
                 st.dataframe(pd.DataFrame(diamond_hits), use_container_width=True, hide_index=True)
                 st.divider()
+                all_hits.extend(diamond_hits)
+        if all_hits:
+            csv_bytes = pd.DataFrame(all_hits).to_csv(index=False).encode()
+            st.download_button("⬇️ Export All Results as CSV", data=csv_bytes,
+                               file_name="results_export.csv", mime="text/csv")
     else:
         st.info("No recent results data found.")
 
