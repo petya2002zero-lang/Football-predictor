@@ -421,7 +421,7 @@ def load_data() -> dict:
     d: dict = {}
     for k in ["upcoming", "pro_preds", "standings", "recent",
               "team_forms", "h2h", "top_scorers", "insights",
-              "league_averages", "pi_ratings"]:
+              "league_averages", "pi_ratings", "hist_preds"]:
         d[k] = load_kv(k, [] if k in ("upcoming", "recent") else {})
 
     # Legacy .pkl migration
@@ -710,8 +710,8 @@ def get_match_math(match_data: dict):
     # League-specific rho (V3 upgrade)
     rho = LEAGUE_RHO.get(league, DEFAULT_RHO)
 
-    # Base xG from pro_preds (train_master.py populates these)
-    pp = data["pro_preds"].get(match_key, {})
+    # Base xG from pro_preds (upcoming) or hist_preds (completed matches)
+    pp = data["pro_preds"].get(match_key) or data["hist_preds"].get(match_key, {})
     # Pro_preds may also carry a per-match rho computed in train_master
     rho = pp.get("rho", rho)
 

@@ -1332,6 +1332,11 @@ for match in upcoming_matches[:150]:
         "h_form_pts": h_form, "a_form_pts": a_form,
     }
 
+# Persist prediction features for completed-match lookup on Results page
+hist_preds = load_kv("hist_preds", {})
+hist_preds.update(pro_predictions)
+save_kv("hist_preds", hist_preds)
+
 save_kv("pro_preds", pro_predictions)
 save_kv("team_stats_cache", team_stats_cache)
 save_kv("coach_cache",      coach_cache)
