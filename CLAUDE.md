@@ -56,7 +56,8 @@ Fetches from API-Football v3 and writes everything to `database.sqlite` via `sav
 |---|---|
 | `recent` | Last 90 days of completed fixtures (2000+ records) — training labels |
 | `upcoming` | Next ~10 days of fixtures — inference targets |
-| `pro_preds` | Pre-computed features for upcoming 150 matches |
+| `pro_preds` | Pre-computed features for upcoming 150 matches (overwritten each run) |
+| `hist_preds` | Cumulative archive of `pro_preds` entries — same schema, keyed by `"{home} vs {away}"`, accumulated across runs so the Emerald/Diamond Results page can look up real features for completed matches instead of falling back to defaults |
 | `hist_odds_cache` | Historical Pinnacle odds keyed by `fixture_id` (fills 120/run) |
 | `pi_ratings` | Elo/Pi ratings per team + `{team}_safety`, `{team}_title`, `{team}_xpts_delta`. Base team ratings are **z-score normalized** (mean=0, std=1) at the end of Section 2 so `pi_diff` is always on a consistent scale regardless of backend. |
 | `league_averages` | Per-league goal averages and H/D/A rates |
@@ -129,7 +130,7 @@ Loads all 8 `.joblib` files and all `kv_store` keys at startup. Inference for ea
 
 **Display constants:** `DEFAULT_LEAGUES` (18 leagues) auto-selected in sidebar. Cup competitions (FA Cup, Copa del Rey, DFB Pokal, Coppa Italia, Coupe de France, Carabao Cup, KNVB Beker) are excluded from the default view via `CUP_NAMES`. Tier thresholds in `render_match_card()`: Emerald ≥85% (≥90% if no true xG), Diamond+ ≥75%, Diamond ≥65%, Gold <65%. Timezone hardcoded to `Europe/Budapest` in `format_time()`.
 
-**`get_best_pick(stats, m, core_only=False)`** — selects the highest-confidence market pick. When `core_only=False` (default, used by League Predictions and Parlay Builder), it can fall back to Asian Handicap (+1.5/-1.5) picks if they beat core-market confidence. The **Emerald/Diamond Results page passes `core_only=True`** to suppress AH picks entirely, ensuring the Prediction column always shows a goals/1X2 market and that Emerald tier is reachable from raw core-market probabilities.
+**`get_best_pick(stats, m, core_only=False)`** — selects the highest-confidence market pick. Resolves `pp` from `pro_preds` first, then `hist_preds` (needed for completed matches). When `core_only=False` (default, used by League Predictions and Parlay Builder), it can fall back to Asian Handicap (+1.5/-1.5) picks if they beat core-market confidence. The **Emerald/Diamond Results page passes `core_only=True`** to suppress AH picks entirely, ensuring the Prediction column always shows a goals/1X2 market and that Emerald tier is reachable from raw core-market probabilities.
 
 ## Critical Constraints
 
@@ -238,6 +239,7 @@ new_derived = base_a - base_b
 - **sklearn calibration dtype** — `sample_weights` (and any array passed to `CalibratedClassifierCV.fit`) must be `np.float32` to match `X` dtype. Cython `CyHalfBinomialLoss.loss_gradient` raises `ValueError: Buffer dtype mismatch` on float64/float32 mismatches. Both XGBoost and LightGBM are wrapped (`_XGBFloat32`, `_LGBMFloat32`) to force float32 `predict_proba` output inside `CalibratedClassifierCV`.
 - **Model deserialization requires wrapper stubs** — `.joblib` files reference `train_ml._XGBFloat32` and `train_ml._LGBMFloat32` (the module name pickled when `train_ml.py` ran). Any file that calls `joblib.load()` on these models must register a stub `train_ml` module in `sys.modules` with these classes **before** loading, or Python will `import train_ml` (which has no `__main__` guard and runs the full training pipeline). See `dashboard.py` lines ~42-48 for the pattern. `backtest.py` also needs this if it loads models.
 - **Never `import train_ml`** at module level — `train_ml.py` has no `if __name__ == "__main__"` guard. Importing it runs the full Optuna + training pipeline. Use the stub pattern above or read constants manually.
+- **Emerald/Diamond Results page only shows matches with real feature data** — the page guards against showing rows where neither `pro_preds` nor `hist_preds` has an entry for the match. Without this guard, hardcoded default xG values (1.45/1.20) produce Poisson(2.65) → p_u45 ≈ 87%, making every row show "Under 4.5 (87%)". `hist_preds` coverage grows with each `train_master.py` run (accumulates from `pro_preds`); expect fewer results rows until it fills in.
 
 ## CI/CD
 
