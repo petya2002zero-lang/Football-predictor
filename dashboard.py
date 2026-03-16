@@ -1355,7 +1355,8 @@ def render_match_card(m: dict, pre_calc=None):
 
 def get_best_pick(stats, m: dict, core_only: bool = False):
     p_h, p_d, p_a, h_xg, a_xg, p_o25, p_btts, p_u35, score, det = stats
-    pp = data["pro_preds"].get(f"{m['home']} vs {m['away']}", {})
+    _mk = f"{m['home']} vs {m['away']}"
+    pp = data["pro_preds"].get(_mk) or data["hist_preds"].get(_mk, {})
     emerald_thresh = 85.0 if (pp.get("h_true_xg") or pp.get("a_true_xg")) else 90.0
 
     core = {
@@ -1442,6 +1443,9 @@ elif page == "🟢 Emerald/Diamond Results":
             day_matches  = [m for m in recent_sorted if m["date"].startswith(d)]
             diamond_hits = []
             for m in day_matches:
+                _mk = f"{m.get('home', '')} vs {m.get('away', '')}"
+                if not (data["pro_preds"].get(_mk) or data["hist_preds"].get(_mk)):
+                    continue  # No real feature data — skip to avoid misleading default prediction
                 try:
                     stats = _cached_match_math(m)
                     ai_pick, top_p, emerald_thresh = get_best_pick(stats, m, core_only=True)
