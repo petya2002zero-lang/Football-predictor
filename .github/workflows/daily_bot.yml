@@ -69,7 +69,8 @@ jobs:
         run: |
           git config --global user.name  "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          git pull --rebase origin main || true
+          git fetch origin main
+          git reset --hard origin/main
           git add -f database.sqlite
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "🤖 Auto-update $(date -u '+%Y-%m-%d %H:%M UTC')"
@@ -78,7 +79,8 @@ jobs:
       - name: Commit retrained models
         if: github.event.inputs.retrain_models == 'true'
         run: |
-          git pull --rebase origin main || true
+          git fetch origin main
+          git reset --hard origin/main
           git add -f xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib meta_temperature.joblib
           git diff --cached --quiet && echo "No model changes" && exit 0
           git commit -m "🧠 Retrained models $(date -u '+%Y-%m-%d')"
@@ -120,7 +122,7 @@ jobs:
 
           # Stage and commit (force-add gitignored files needed by HF)
           git add .
-          git add -f hf_data.json *.joblib || true
+          git add -f hf_data.json *.joblib database.sqlite || true
           git commit -m "🚀 Deploy $(date -u '+%Y-%m-%d %H:%M UTC')"
 
           # Push to HF with LFS
