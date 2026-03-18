@@ -69,8 +69,10 @@ jobs:
         run: |
           git config --global user.name  "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
+          cp database.sqlite /tmp/new_database.sqlite
           git fetch origin main
           git reset --hard origin/main
+          cp /tmp/new_database.sqlite database.sqlite
           git add -f database.sqlite
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "🤖 Auto-update $(date -u '+%Y-%m-%d %H:%M UTC')"
