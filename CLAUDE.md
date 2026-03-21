@@ -58,7 +58,7 @@ Fetches from API-Football v3 and writes everything to `database.sqlite` via `sav
 | `upcoming` | Next ~10 days of fixtures — inference targets |
 | `pro_preds` | Pre-computed features for upcoming 150 matches (overwritten each run) |
 | `hist_preds` | Cumulative archive of `pro_preds` entries — same schema, keyed by `"{home} vs {away}"`, accumulated across runs so the Emerald/Diamond Results page can look up real features for completed matches instead of falling back to defaults |
-| `hist_odds_cache` | Historical Pinnacle odds keyed by `fixture_id` (fills 120/run) |
+| `hist_odds_cache` | Historical Pinnacle odds keyed by `fixture_id` (fills 200/run) |
 | `pi_ratings` | Elo/Pi ratings per team + `{team}_safety`, `{team}_title`, `{team}_xpts_delta`. Base team ratings are **z-score normalized** (mean=0, std=1) at the end of Section 2 so `pi_diff` is always on a consistent scale regardless of backend. |
 | `league_averages` | Per-league goal averages and H/D/A rates |
 | `insights` | Per-fixture injury, odds, sharp-action data |
@@ -72,27 +72,31 @@ The pipeline runs in numbered sections:
 3. Standings → `league_averages`, `team_forms`, `pi_ratings` (safety/title/xpts extensions)
 4. Team stats (weekly-cached per team+league cycle key; `get_team_stats(team_id, league_id, fixture_date=None)` accepts an optional `fixture_date` — if the cached `last_date` is within 3 days of the fixture, the entry is invalidated and re-fetched automatically)
 5. Match insights — H2H, odds, injuries for upcoming matches
-5.5. Historical odds — fetches Pinnacle odds for 120 most-recent unfetched completed fixtures
+5.5. Historical odds — fetches Pinnacle odds for 200 most-recent unfetched completed fixtures
 6. Pro predictions — compiles full feature dict per upcoming match into `pro_preds`
 
-### Stage 2 — `train_ml.py` (ML Pipeline — V5.0)
+### Stage 2 — `train_ml.py` (ML Pipeline — V5.1)
 Reads from `database.sqlite`, builds a 3-layer ensemble, saves 8 `.joblib` files.
 
-**Feature contract:** `FEATURE_COLS` (29 features), `META_RAW_COLS` (10 features), and `FEATURE_COLS_O25` (19 features) are defined at the top of both `train_ml.py` and `dashboard.py` and **must match exactly**. Changing any list requires updating both files simultaneously. Note: the inline comment `N_FEAT = len(FEATURE_COLS)  # 26` in `train_ml.py` is stale — the actual length is 29.
+**Feature contract:** `FEATURE_COLS` (33 features), `META_RAW_COLS` (10 features), and `FEATURE_COLS_O25` (21 features) are defined at the top of `train_ml.py`, `dashboard.py`, **and `backtest.py`** and **must match exactly across all three**. Changing any list requires updating all three files simultaneously. Do NOT verify by importing `train_ml` — it has no `__main__` guard and runs the full training pipeline on import.
 
-`FEATURE_COLS` includes 3 derived defensive features computed from existing `pro_preds` values — **no `train_master.py` change needed** for derived features:
+`FEATURE_COLS` includes 7 derived features computed from existing `pro_preds` values — **no `train_master.py` change needed** for derived features:
 - `cs_diff` = `cs_h - cs_a` (net home defensive edge)
 - `defensive_dominance` = `(cs_h + fts_a) / 2` (P home keeps clean sheet)
 - `attacking_vulnerability` = `(cs_a + fts_h) / 2` (P away keeps clean sheet)
+- `h_card_diff` = `h_yellow - a_yellow` (card discipline gap — V5.1)
+- `h_susp` = `float(bool(h_susp))` — suspension flag, explicit beyond the −8% xG adjustment (V5.1)
+- `a_susp` = same for away team (V5.1)
+- `h2h_n_norm` = `min(1.0, h2h_n / 5.0)` — H2H sample confidence (V5.1)
 
-`FEATURE_COLS_O25` is a separate 19-feature set used only by the O2.5 models — it drops table-position and 1X2-distribution features irrelevant to total goals. The O2.5 models train on `X_o25 = df[FEATURE_COLS_O25]`, not `X`.
+`FEATURE_COLS_O25` is a separate 21-feature set used only by the O2.5 models — drops table-position and 1X2-distribution features. Adds `h_card_diff` and `card_total` (= `h_yellow + a_yellow`) vs V5.0. The O2.5 models train on `X_o25 = df[FEATURE_COLS_O25]`, not `X`.
 
 **Training data assembly:** Each record in `recent` is matched to `pro_preds` by `"{home} vs {away}"` key for team-specific features. Pinnacle odds come from `hist_odds_cache[str(fixture_id)]`. Market edge is computed in `train_ml.py` using `get_dc_probs()`.
 
 **Training constants:**
 - `HALF_LIFE_DAYS = 60.0` — sample weight decay (doubled from V4's 30)
 - `SYNTHETIC_CAP = 1500`, `SYNTHETIC_WEIGHT = 0.3` — bootstrap synthetic records if real data is sparse
-- Optuna trials: 75 (XGB/LGB match), 50 (O2.5 models), 30 (meta-learner C); only runs when `n_real >= 150` (match) or `>= 100` (meta)
+- Optuna trials: 100 (XGB/LGB match), 75 (O2.5 models), 50 (meta-C match), 40 (meta-C O2.5); only runs when `n_real >= 150` (match) or `>= 100` (meta)
 
 **Model stack (19-feature meta):**
 ```
@@ -120,11 +124,11 @@ All models use `CalibratedClassifierCV` wrapping the base learner. **OOF predict
 
 ### Stage 3 — `dashboard.py` (Streamlit UI)
 Loads all 8 `.joblib` files and all `kv_store` keys at startup. Inference for each match follows:
-1. Build 29-feature vector (`FEATURE_COLS`) from `pro_preds` + `pi_ratings` + `team_forms` + `insights`; includes 3 derived defensive features computed inline from `cs_h/cs_a/fts_h/fts_a`
+1. Build 33-feature vector (`FEATURE_COLS`) from `pro_preds` + `pi_ratings` + `team_forms` + `insights`; includes 7 derived features computed inline (3 defensive + 4 added in V5.1: `h_card_diff`, `h_susp_val`, `a_susp_val`, `h2h_n_norm`)
 2. Get XGB probs, LGB probs, Dixon-Coles probs
 3. Scale `META_RAW_COLS` via `meta_scaler` — raw features are clipped to `[-10, 10]` before transform and scaled output clipped to `[-5, 5]` to guard against future feature-scale drift
 4. Concatenate → 19-feature vector → `meta_match_model` → temperature scaling → final probs clipped to `[0.03, 0.97]` and renormalized
-5. O2.5: separate 19-feature `features_o25` (`FEATURE_COLS_O25`) → XGB + LGB + DC → `meta_o25_model` → final O2.5 prob
+5. O2.5: separate 21-feature `features_o25` (`FEATURE_COLS_O25`) → XGB + LGB + DC → `meta_o25_model` → final O2.5 prob
 
 **`get_match_math(m)` caching:** `_cached_match_math(m)` wraps `get_match_math` with a `st.session_state` dict invalidated by `id(data["upcoming"])`. All loop call sites use `_cached_match_math` — never call `get_match_math` in a loop directly.
 
@@ -134,13 +138,13 @@ Loads all 8 `.joblib` files and all `kv_store` keys at startup. Inference for ea
 
 ## Critical Constraints
 
-- **FEATURE_COLS, FEATURE_COLS_O25, and META_RAW_COLS must be identical** in `train_ml.py`, `dashboard.py`, and `backtest.py`. Do NOT verify by importing `train_ml` — it has no `__main__` guard and runs the full training pipeline on import. Instead, compare the lists manually or use `grep`.
+- **FEATURE_COLS, FEATURE_COLS_O25, and META_RAW_COLS must be identical** in `train_ml.py`, `dashboard.py`, and `backtest.py`. Compare manually or use `grep` — never import `train_ml` to check (it runs the full training pipeline on import).
 - **Model class order is Away=0, Draw=1, Home=2** — `probs[2]` is home win, not `probs[0]`.
 - **Never modify `database.sqlite` schema** — the kv_store is append/replace only. Never drop tables.
 - **Never overwrite a model file** — always retrain from scratch with `train_ml.py`; it overwrites atomically via `joblib.dump`.
 - **`api_cache` is the quota guard** — historical API responses are cached indefinitely by `endpoint||params` key. Clearing it will burn quota on the next `train_master.py` run.
 - **`bet_log` is private** — `export_hf_data.py` explicitly excludes it when syncing to Hugging Face Spaces.
-- **`hist_odds_cache` fills gradually** — 120 fixtures per `train_master.py` run, newest first. After ~18 runs all 2100+ training records will have real Pinnacle features.
+- **`hist_odds_cache` fills gradually** — 200 fixtures per `train_master.py` run, newest first. After ~11 runs all 2100+ training records will have real Pinnacle features.
 - **All data reads must try SQLite first, fall back to `hf_data.json`** — `load_kv()` handles this. Never add a data source that only works locally.
 - **Dixon-Coles rho is league-specific** — use `LEAGUE_RHO.get(league, DEFAULT_RHO)`, never hardcode `-0.130`.
 
@@ -211,7 +215,7 @@ pro_predictions[match_key]["new_feature"] = round(new_feature, 4)
 
 **Derived feature** (computed from existing pro_preds values — no train_master.py change needed):
 ```python
-# 1. Add to FEATURE_COLS in BOTH train_ml.py and dashboard.py
+# 1. Add to FEATURE_COLS in train_ml.py, dashboard.py, AND backtest.py
 
 # 2. In train_ml.py dataset.append() — compute inline:
 "new_derived": float(pp.get("base_a", 0.0)) - float(pp.get("base_b", 0.0)),
@@ -224,9 +228,12 @@ pro_predictions[match_key]["new_feature"] = round(new_feature, 4)
 # 4. In dashboard.py get_match_math() — compute from already-loaded variables
 #    before the pd.DataFrame([[...]]) build:
 new_derived = base_a - base_b
+
+# 5. In backtest.py build_feat() return dict:
+"new_derived": float(pp.get("base_a", 0.0)) - float(pp.get("base_b", 0.0)),
 ```
 
-**O2.5-only feature** — add to `FEATURE_COLS_O25` (not `FEATURE_COLS`) in both files; uses the `X_o25` matrix in train_ml.py and `features_o25` DataFrame in dashboard.py.
+**O2.5-only feature** — add to `FEATURE_COLS_O25` (not `FEATURE_COLS`) in all three files; uses the `X_o25` matrix in train_ml.py, `features_o25` DataFrame in dashboard.py, and `build_feat()` return dict in backtest.py.
 
 ## Common Gotchas
 
@@ -243,10 +250,10 @@ new_derived = base_a - base_b
 
 ## CI/CD
 
-`.github/workflows/daily_bot.yml` runs twice daily (07:00 and 13:00 UTC):
-- Always runs `train_master.py` and force-commits `database.sqlite` (gitignored locally, `git add -f` in CI)
+`.github/workflows/daily_bot.yml` runs once daily (07:00 UTC) or on-demand via `workflow_dispatch`:
+- Always runs `train_master.py` and force-commits `database.sqlite` (gitignored locally, `git add -f` in CI). Uses `git fetch origin main && git reset --hard origin/main` before staging to avoid rebase failures on this tracked binary file.
 - Runs `train_ml.py` and force-commits 8 `.joblib` files only when triggered with `retrain_models=true` via `workflow_dispatch` (`feature_cols_o25.joblib` is not committed — `backtest.py` uses a hardcoded fallback)
-- Syncs to Hugging Face Spaces: creates an orphan branch (`hf-deploy`) with zero history, writes `.gitattributes` for LFS (`*.sqlite`, `*.joblib`, `*.pkl`), and force-pushes to `huggingface.co/spaces/P3tya/FootballPredictor` (uses `export_hf_data.py` to export `hf_data.json` instead of the SQLite file, which exceeds HF's 10 MB limit)
+- Syncs to Hugging Face Spaces: creates an orphan branch (`hf-deploy`) with zero history, writes `.gitattributes` for LFS (`*.sqlite`, `*.joblib`, `*.pkl`), and force-pushes to `huggingface.co/spaces/P3tya/FootballPredictor`. Both `database.sqlite` (via LFS) and `hf_data.json` (from `export_hf_data.py`) are committed; `load_kv()` tries SQLite first and falls back to `hf_data.json`.
 
 Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
 
@@ -276,7 +283,7 @@ Secrets required: `API_KEY` (API-Football), `HF_TOKEN` (Hugging Face).
 
 ## Performance Targets
 
-V5.0 baseline (2026-03-09 retrain): accuracy 55.7%, log-loss 0.9318, Brier 0.1843. Regressions below these numbers indicate a problem.
+V5.0 baseline (2026-03-09 retrain): accuracy 55.7%, log-loss 0.9318, Brier 0.1843. V5.1 target: accuracy 56.5%+, log-loss < 0.92. Regressions below V5.0 numbers after a V5.1 retrain indicate a problem.
 
 - Meta OOF accuracy: > 55% (random baseline ~33%)
 - Meta OOF log-loss: < 0.95 (random baseline ln(3) ≈ 1.099)
