@@ -98,7 +98,7 @@ LEAGUE_RHO: dict = {
 DEFAULT_RHO = -0.130
 
 # ---------------------------------------------------------------------------
-# FEATURE SET — 26 features; must exactly match what dashboard.py builds
+# FEATURE SET — 33 features; must exactly match what dashboard.py builds
 # ---------------------------------------------------------------------------
 FEATURE_COLS = [
     # Core xG — venue-specific from V3.3 (2)
@@ -124,8 +124,14 @@ FEATURE_COLS = [
     "pin_implied_h", "pin_implied_a",
     # Model vs Pinnacle edge — new V3.3 (2)
     "market_edge_h", "market_edge_a",
+    # Card discipline (1 derived) — not encoded in xG; disrupted teams concede more
+    "h_card_diff",
+    # Suspension flags (2) — explicit signal beyond the -8% xG adjustment
+    "h_susp", "a_susp",
+    # H2H sample confidence (1 derived) — weights h2h win rates by meeting count
+    "h2h_n_norm",
 ]
-N_FEAT = len(FEATURE_COLS)  # 26
+N_FEAT = len(FEATURE_COLS)  # 33
 
 # V5.0: Extended raw features passed through to meta-learner (was 6, now 10)
 # Adds defensive profile (cs_h, cs_a), injury context, and league goal rate
@@ -162,6 +168,9 @@ FEATURE_COLS_O25 = [
     "h2h_draw_rate",
     # Form diff — chasing team opens up → more goals (1)
     "form_diff",
+    # Card aggression signals (2) — disrupted/aggressive games affect goal counts
+    "h_card_diff",   # home discipline advantage
+    "card_total",    # h_yellow + a_yellow: overall aggression proxy
 ]
 
 
@@ -400,6 +409,11 @@ for r in recent:
             "pin_implied_a":         pin_a,
             "market_edge_h":         m_edge_h,
             "market_edge_a":         m_edge_a,
+            "h_card_diff":           float(pp.get("h_yellow", 1.8)) - float(pp.get("a_yellow", 1.8)),
+            "h_susp":                float(bool(pp.get("h_susp", False))),
+            "a_susp":                float(bool(pp.get("a_susp", False))),
+            "h2h_n_norm":            min(1.0, float(pp.get("h2h_n", 0)) / 5.0),
+            "card_total":            float(pp.get("h_yellow", 1.8)) + float(pp.get("a_yellow", 1.8)),
             "target":                target,
             "target_o25":            target_o25,
             "league":                league,
@@ -509,6 +523,11 @@ if n_needed > 0:
             "pin_implied_a":         0.0,
             "market_edge_h":         0.0,
             "market_edge_a":         0.0,
+            "h_card_diff":           float(rng.normal(0.0, 0.8)),
+            "h_susp":                float(rng.random() < 0.10),
+            "a_susp":                float(rng.random() < 0.10),
+            "h2h_n_norm":            float(rng.beta(2, 3)),
+            "card_total":            float(rng.normal(3.6, 1.2)),
             "target":                t,
             "target_o25":            1 if (hg+ag)>2 else 0,
             "league":                "",
@@ -578,7 +597,7 @@ def pick_calibration_method(base_clf, X, y, cv, sample_weight=None):
 # OPTUNA — XGBoost hyperparameter search (V4.0: 75 trials + sample weights)
 # ---------------------------------------------------------------------------
 if OPTUNA_AVAILABLE and n_real >= 150:
-    log.info("🔍 Optuna XGB match search (75 trials)...")
+    log.info("🔍 Optuna XGB match search (100 trials)...")
 
     def xgb_objective(trial):
         p = dict(
@@ -602,7 +621,7 @@ if OPTUNA_AVAILABLE and n_real >= 150:
 
     xgb_study = optuna.create_study(direction="minimize",
                                      pruner=optuna.pruners.MedianPruner())
-    xgb_study.optimize(xgb_objective, n_trials=75, n_jobs=1)
+    xgb_study.optimize(xgb_objective, n_trials=100, n_jobs=1)
     best_xgb_p = xgb_study.best_params
     log.info("✅ XGB Optuna best real-only log-loss=%.4f", xgb_study.best_value)
 else:
@@ -624,7 +643,7 @@ else:
 best_lgb_p = None
 if LGB_AVAILABLE:
     if OPTUNA_AVAILABLE and n_real >= 150:
-        log.info("🔍 Optuna LGB search (75 trials)...")
+        log.info("🔍 Optuna LGB search (100 trials)...")
 
         def lgb_objective(trial):
             p = dict(
@@ -647,7 +666,7 @@ if LGB_AVAILABLE:
 
         lgb_study = optuna.create_study(direction="minimize",
                                          pruner=optuna.pruners.MedianPruner())
-        lgb_study.optimize(lgb_objective, n_trials=75, n_jobs=1)
+        lgb_study.optimize(lgb_objective, n_trials=100, n_jobs=1)
         best_lgb_p = lgb_study.best_params
         log.info("✅ LGB Optuna best real-only log-loss=%.4f", lgb_study.best_value)
     else:
@@ -663,7 +682,7 @@ if LGB_AVAILABLE:
 # V4.0: OPTUNA — Separate O2.5 hyperparameter search
 # ---------------------------------------------------------------------------
 if OPTUNA_AVAILABLE and n_real >= 150:
-    log.info("🔍 Optuna O2.5 search (50 trials)...")
+    log.info("🔍 Optuna O2.5 search (75 trials)...")
 
     def o25_objective(trial):
         p = dict(
@@ -685,7 +704,7 @@ if OPTUNA_AVAILABLE and n_real >= 150:
         return log_loss(y_o25[:n_real], oof[:n_real, 1])
 
     o25_study = optuna.create_study(direction="minimize")
-    o25_study.optimize(o25_objective, n_trials=50, n_jobs=1)
+    o25_study.optimize(o25_objective, n_trials=75, n_jobs=1)
     best_o25_p = o25_study.best_params
     log.info("✅ O2.5 Optuna best real-only log-loss=%.4f", o25_study.best_value)
 else:
@@ -839,7 +858,7 @@ log.info("Training Logistic Regression meta-learner...")
 # Tune meta-learner C regularisation
 best_meta_C = 1.0
 if OPTUNA_AVAILABLE and n_real >= 100:
-    log.info("🔍 Optuna meta-learner C search (30 trials)...")
+    log.info("🔍 Optuna meta-learner C search (50 trials)...")
 
     def meta_objective(trial):
         c_val = trial.suggest_float("C", 0.01, 50.0, log=True)
@@ -852,7 +871,7 @@ if OPTUNA_AVAILABLE and n_real >= 100:
         return log_loss(y_match[:n_real], oof[:n_real])
 
     meta_study = optuna.create_study(direction="minimize")
-    meta_study.optimize(meta_objective, n_trials=30, n_jobs=1)
+    meta_study.optimize(meta_objective, n_trials=50, n_jobs=1)
     best_meta_C = meta_study.best_params["C"]
     log.info("✅ Meta C=%.4f  best real-only log-loss=%.4f", best_meta_C, meta_study.best_value)
 
@@ -969,7 +988,7 @@ if OPTUNA_AVAILABLE and n_real >= 100:
         oof = _oof_predict(meta_o25, X_meta_o25, y_o25, cv=cv, sample_weight=sample_weights)
         return log_loss(y_o25[:n_real], oof[:n_real, 1])
     meta_o25_study = optuna.create_study(direction="minimize")
-    meta_o25_study.optimize(meta_o25_objective, n_trials=20, n_jobs=1)
+    meta_o25_study.optimize(meta_o25_objective, n_trials=40, n_jobs=1)
     best_meta_o25_C = meta_o25_study.best_params["C"]
     log.info("✅ O2.5 meta C=%.4f  best log-loss=%.4f", best_meta_o25_C, meta_o25_study.best_value)
 

@@ -94,6 +94,12 @@ FEATURE_COLS = [
     "league_home_win_rate", "league_draw_rate", "league_avg_goals",
     "pin_implied_h", "pin_implied_a",
     "market_edge_h", "market_edge_a",
+    # Card discipline (1 derived) — not encoded in xG; disrupted teams concede more
+    "h_card_diff",
+    # Suspension flags (2) — explicit signal beyond the -8% xG adjustment
+    "h_susp", "a_susp",
+    # H2H sample confidence (1 derived) — weights h2h win rates by meeting count
+    "h2h_n_norm",
 ]
 
 # Goals-market feature set — must match FEATURE_COLS_O25 in train_ml.py exactly.
@@ -110,6 +116,9 @@ FEATURE_COLS_O25 = [
     "injury_diff",
     "h2h_draw_rate",
     "form_diff",
+    # Card aggression signals (2) — disrupted/aggressive games affect goal counts
+    "h_card_diff",
+    "card_total",
 ]
 
 # V5.0: 10 raw features passed through StandardScaler into meta-learner.
@@ -869,6 +878,11 @@ def get_match_math(match_data: dict):
             cs_diff              = cs_h - cs_a
             defensive_dominance  = (cs_h + fts_a) / 2.0
             attacking_vulnerability = (cs_a + fts_h) / 2.0
+            h_card_diff = h_yellow - a_yellow
+            card_total  = h_yellow + a_yellow
+            h_susp_val  = float(bool(pp.get("h_susp", False)))
+            a_susp_val  = float(bool(pp.get("a_susp", False)))
+            h2h_n_norm  = min(1.0, float(pp.get("h2h_n", 0)) / 5.0)
             features = pd.DataFrame([[
                 h_xg, a_xg, pi_diff, xpts_delta, pts_safety, pts_title,
                 a_pts_safety, a_pts_title, injury_diff,
@@ -879,6 +893,7 @@ def get_match_math(match_data: dict):
                 lg_hw, lg_dr, lg_ag,
                 pin_h, pin_a,
                 mkt_edge_h, mkt_edge_a,
+                h_card_diff, h_susp_val, a_susp_val, h2h_n_norm,
             ]], columns=FEATURE_COLS)
 
             # Base XGBoost (classes: 0=Away, 1=Draw, 2=Home)
@@ -897,6 +912,7 @@ def get_match_math(match_data: dict):
                 injury_diff,
                 h2h_dr,
                 form_diff,
+                h_card_diff, card_total,
             ]], columns=FEATURE_COLS_O25)
             o25_probs = ml_model_o25.predict_proba(features_o25)[0]
             ml_p_o25  = float(o25_probs[1]) * 100

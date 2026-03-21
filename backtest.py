@@ -64,6 +64,9 @@ FEATURE_COLS = [
     "league_home_win_rate", "league_draw_rate", "league_avg_goals",
     "pin_implied_h", "pin_implied_a",
     "market_edge_h", "market_edge_a",
+    "h_card_diff",
+    "h_susp", "a_susp",
+    "h2h_n_norm",
 ]
 FEATURE_COLS_O25 = [
     "h_xg", "a_xg",
@@ -77,6 +80,8 @@ FEATURE_COLS_O25 = [
     "injury_diff",
     "h2h_draw_rate",
     "form_diff",
+    "h_card_diff",
+    "card_total",
 ]
 META_RAW_COLS = [
     "h_xg", "a_xg", "pi_diff", "form_diff", "pin_implied_h", "pin_implied_a",
@@ -280,6 +285,11 @@ def build_feat(rec: dict, pro_preds: dict, pi_ratings: dict,
         "pin_implied_a": pin_a,
         "market_edge_h": market_edge_h,
         "market_edge_a": market_edge_a,
+        "h_card_diff":           float(pp.get("h_yellow", 1.8)) - float(pp.get("a_yellow", 1.8)),
+        "h_susp":                float(bool(pp.get("h_susp", False))),
+        "a_susp":                float(bool(pp.get("a_susp", False))),
+        "h2h_n_norm":            min(1.0, float(pp.get("h2h_n", 0)) / 5.0),
+        "card_total":            float(pp.get("h_yellow", 1.8)) + float(pp.get("a_yellow", 1.8)),
         "_has_odds":   has_odds,
         "_pin_h": pin_h, "_pin_a": pin_a,
         "_dc_ph": dc_ph, "_dc_pd": dc_pd, "_dc_pa": dc_pa,

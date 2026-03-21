@@ -1017,7 +1017,7 @@ log.info("Insights done. API requests: %d", _quota_used)
 # covers upcoming matches. This section fetches and caches odds for completed
 # fixtures so train_ml.py can use real market signals in every training row.
 # Budget: HIST_ODDS_PER_RUN per run; across runs the full recent window fills in.
-HIST_ODDS_PER_RUN = 120
+HIST_ODDS_PER_RUN = 200
 
 hist_odds_cache = load_kv("hist_odds_cache", {})
 
