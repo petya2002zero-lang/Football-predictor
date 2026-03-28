@@ -65,6 +65,18 @@ jobs:
         if: github.event.inputs.retrain_models == 'true'
         run: python train_ml.py
 
+      - name: Save retrained models to temp
+        if: github.event.inputs.retrain_models == 'true'
+        run: |
+          cp xgb_match_model.joblib     /tmp/xgb_match_model.joblib
+          cp lgb_match_model.joblib     /tmp/lgb_match_model.joblib
+          cp meta_match_model.joblib    /tmp/meta_match_model.joblib
+          cp meta_scaler.joblib         /tmp/meta_scaler.joblib
+          cp xgb_o25_model.joblib       /tmp/xgb_o25_model.joblib
+          cp lgb_o25_model.joblib       /tmp/lgb_o25_model.joblib
+          cp meta_o25_model.joblib      /tmp/meta_o25_model.joblib
+          cp meta_temperature.joblib    /tmp/meta_temperature.joblib
+
       - name: Commit database
         run: |
           git config --global user.name  "GitHub Actions Bot"
@@ -81,14 +93,6 @@ jobs:
       - name: Commit retrained models
         if: github.event.inputs.retrain_models == 'true'
         run: |
-          cp xgb_match_model.joblib     /tmp/xgb_match_model.joblib
-          cp lgb_match_model.joblib     /tmp/lgb_match_model.joblib
-          cp meta_match_model.joblib    /tmp/meta_match_model.joblib
-          cp meta_scaler.joblib         /tmp/meta_scaler.joblib
-          cp xgb_o25_model.joblib       /tmp/xgb_o25_model.joblib
-          cp lgb_o25_model.joblib       /tmp/lgb_o25_model.joblib
-          cp meta_o25_model.joblib      /tmp/meta_o25_model.joblib
-          cp meta_temperature.joblib    /tmp/meta_temperature.joblib
           git fetch origin main
           git reset --hard origin/main
           cp /tmp/xgb_match_model.joblib     xgb_match_model.joblib
