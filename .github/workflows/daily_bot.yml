@@ -81,8 +81,24 @@ jobs:
       - name: Commit retrained models
         if: github.event.inputs.retrain_models == 'true'
         run: |
+          cp xgb_match_model.joblib     /tmp/xgb_match_model.joblib
+          cp lgb_match_model.joblib     /tmp/lgb_match_model.joblib
+          cp meta_match_model.joblib    /tmp/meta_match_model.joblib
+          cp meta_scaler.joblib         /tmp/meta_scaler.joblib
+          cp xgb_o25_model.joblib       /tmp/xgb_o25_model.joblib
+          cp lgb_o25_model.joblib       /tmp/lgb_o25_model.joblib
+          cp meta_o25_model.joblib      /tmp/meta_o25_model.joblib
+          cp meta_temperature.joblib    /tmp/meta_temperature.joblib
           git fetch origin main
           git reset --hard origin/main
+          cp /tmp/xgb_match_model.joblib     xgb_match_model.joblib
+          cp /tmp/lgb_match_model.joblib     lgb_match_model.joblib
+          cp /tmp/meta_match_model.joblib    meta_match_model.joblib
+          cp /tmp/meta_scaler.joblib         meta_scaler.joblib
+          cp /tmp/xgb_o25_model.joblib       xgb_o25_model.joblib
+          cp /tmp/lgb_o25_model.joblib       lgb_o25_model.joblib
+          cp /tmp/meta_o25_model.joblib      meta_o25_model.joblib
+          cp /tmp/meta_temperature.joblib    meta_temperature.joblib
           git add -f xgb_match_model.joblib xgb_o25_model.joblib meta_match_model.joblib lgb_match_model.joblib meta_scaler.joblib lgb_o25_model.joblib meta_o25_model.joblib meta_temperature.joblib
           git diff --cached --quiet && echo "No model changes" && exit 0
           git commit -m "🧠 Retrained models $(date -u '+%Y-%m-%d')"
