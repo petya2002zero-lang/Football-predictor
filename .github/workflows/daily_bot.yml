@@ -127,6 +127,7 @@ jobs:
           WORK=$(mktemp -d)
           git worktree add "$WORK" --detach
           cd "$WORK"
+          git lfs install
           git checkout --orphan hf-deploy
           git rm -rf . --quiet
 
@@ -137,9 +138,10 @@ jobs:
 
           # Set up LFS tracking for large files
           cat > .gitattributes << 'ATTRS'
-          *.sqlite filter=lfs diff=lfs merge=lfs -text
-          *.joblib filter=lfs diff=lfs merge=lfs -text
-          *.pkl    filter=lfs diff=lfs merge=lfs -text
+          *.sqlite      filter=lfs diff=lfs merge=lfs -text
+          *.joblib      filter=lfs diff=lfs merge=lfs -text
+          *.pkl         filter=lfs diff=lfs merge=lfs -text
+          hf_data.json  filter=lfs diff=lfs merge=lfs -text
           ATTRS
 
           # Stage and commit (force-add gitignored files needed by HF)
